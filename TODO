@@ -10,5 +10,5 @@ FujiNet Go Atari 800 desktop -- milestones (plan: build-a-new-fujinet-calm-valle
 [x] M6  GNOME (CONFIG boots, typing via Hyprland send_shortcut, panels smoke-tested)
 [x] M7  KDE (CONFIG boots, typing via Hyprland send_shortcut, panels smoke-tested)
 [x] M8  Windows (MinGW cross build boots CONFIG under Wine via a cross-built fujinet.dll; panels Wine-tested)
-[ ] M9  macOS
+[x] M9  macOS (written on Linux, syntax-checked against a Cocoa stub; CI is the first compile)
 [ ] M10 packaging, CI, release
