@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=FujiNet Go Atari 800
+GenericName=Atari 8-bit Computer Emulator
+Comment=The Atari 400, 800, XL and XE computers with a FujiNet
+Exec=fujinet-go-atari800-kde %f
+Icon=online.fujinet.go.atari800.kde
+Terminal=false
+Categories=Game;Emulator;
+Keywords=atari;800;800xl;130xe;xegs;400;1200xl;8-bit;atari800;fujinet;emulator;retro;
+StartupNotify=true

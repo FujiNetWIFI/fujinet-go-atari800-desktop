@@ -8,7 +8,7 @@ FujiNet Go Atari 800 desktop -- milestones (plan: build-a-new-fujinet-calm-valle
 [x] M4  input: keymap, on-screen keyboard, paste, bindings, gamepads, paddles, mice
 [x] M5  debugger engine (debug_test: ASan + TSan clean)
 [x] M6  GNOME (CONFIG boots, typing via Hyprland send_shortcut, panels smoke-tested)
-[ ] M7  KDE
+[x] M7  KDE (CONFIG boots, typing via Hyprland send_shortcut, panels smoke-tested)
 [ ] M8  Windows
 [ ] M9  macOS
 [ ] M10 packaging, CI, release

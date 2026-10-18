@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>online.fujinet.go.atari800.kde</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>FujiNet Go Atari 800</name>
+  <summary>The Atari 8-bit computers with a built-in FujiNet</summary>
+  <description>
+    <p>
+      The Atari 400, 800, XL and XE computers with a FujiNet plugged into the
+      SIO port: browse network hosts from FujiNet's CONFIG program, boot disks
+      over the network, and run network programs, all in one application.
+    </p>
+    <p>
+      The emulator is atari800. Every model from the 400 to the XEGS and the
+      1450XLD is there, with the 80-column cards (XEP80, Austin Franklin,
+      Bit 3, Proto80), the parallel-bus devices, the NTSC filter and PAL
+      blending. FujiNet runs inside the application and talks to the Atari
+      over NetSIO.
+    </p>
+    <p>
+      No ROMs are needed: AltirraOS and Altirra BASIC are built in. Atari's own
+      operating systems, BASIC and peripheral ROMs can be imported, from ROM
+      images or MAME's sets.
+    </p>
+    <p>
+      The Atari's keyboard, console keys and joysticks are on screen when
+      wanted, gamepads are picked up as they are plugged in and out, the mouse
+      drives paddles, the Koala Pad, mice and the light pen, and a native
+      debugger shows the 6502, disassembly with breakpoints and watchpoints,
+      ANTIC and its display list, GTIA, POKEY, PIA, the memory map and every
+      SIO command.
+    </p>
+  </description>
+  <launchable type="desktop-id">online.fujinet.go.atari800.kde.desktop</launchable>
+  <url type="homepage">https://fujinet.online/</url>
+  <url type="bugtracker">https://github.com/FujiNetWIFI/fujinet-go-atari800-desktop/issues</url>
+  <developer id="online.fujinet">
+    <name>Thomas Cherryhomes</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
+         it cannot disagree with the tree; past releases are literal. The
+         release job checks that this first entry is still a template. -->
+    <release version="@PROJECT_VERSION@" date="2026-10-18">
+      <description>
+        <p>
+          First release: atari800 with an in-process FujiNet over NetSIO,
+          every 8-bit model, built-in AltirraOS, native GNOME, KDE, macOS and
+          Windows frontends, the keyboard and joysticks on screen, hotplugged
+          gamepads and a native debugger.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>
