@@ -304,15 +304,17 @@ static void manifest_add(manifest *m, const char *rel, uint32_t crc)
 {
     if (m->n == m->cap) {
         int cap = m->cap ? m->cap * 2 : 64;
-        void *r = realloc(m->rel, (size_t)cap * sizeof *m->rel);
-        void *c = realloc(m->crc, (size_t)cap * sizeof *m->crc);
-        if (!r || !c)
+        void *r = realloc(m->rel, (size_t)cap * sizeof *m->rel), *c;
+        if (!r)
             return;
         m->rel = r;
+        c = realloc(m->crc, (size_t)cap * sizeof *m->crc);
+        if (!c)
+            return;
         m->crc = c;
         m->cap = cap;
     }
-    snprintf(m->rel[m->n], sizeof m->rel[m->n], "%s", rel);
+    snprintf(m->rel[m->n], sizeof m->rel[m->n], "%.255s", rel);
     m->crc[m->n++] = crc;
 }
 
@@ -384,7 +386,7 @@ static void provision_dir(const char *src_root, const char *dst_root, const char
 
 static void provision_tree(struct a800session *s, const char *asset_src)
 {
-    char path[A800_PATH_MAX], src[A800_PATH_MAX], want[256] = "", have[256] = "";
+    char path[A800_PATH_MAX + 32], src[A800_PATH_MAX], want[256] = "", have[256] = "";
     manifest old = {0}, now = {0};
     FILE *fp;
     int i;

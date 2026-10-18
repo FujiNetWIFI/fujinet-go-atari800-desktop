@@ -5,9 +5,11 @@
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -58,8 +60,8 @@ static int http(const char *method, const char *path, const char *json, char *bo
         return -1;
     }
     snprintf(req, sizeof req,
-             "%s %s HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
-             "Content-Length: %u\r\n\r\n%s",
+             "%s %s HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n"
+             "Content-Type: application/json\r\nContent-Length: %u\r\n\r\n%s",
              method, path, json ? (unsigned)strlen(json) : 0u, json ? json : "");
     if (send(fd, req, (int)strlen(req), 0) <= 0) {
         a800_closesocket(fd);
@@ -70,8 +72,21 @@ static int http(const char *method, const char *path, const char *json, char *bo
         a800_closesocket(fd);
         return -1;
     }
-    while (total < cap && (n = (int)recv(fd, buf + total, cap - total, 0)) > 0)
+    /* to the end of the body: FujiNet's server keeps the connection open
+       after it, so reading to the close would wait out the timeout */
+    while (total < cap && (n = (int)recv(fd, buf + total, cap - total, 0)) > 0) {
+        const char *end, *cl;
         total += n;
+        buf[total] = 0;
+        end = strstr(buf, "\r\n\r\n");
+        if (!end)
+            continue;
+        cl = strstr(buf, "Content-Length:");
+        if (!cl)
+            cl = strstr(buf, "content-length:");
+        if (cl && cl < end && (end - buf) + 4 + atoi(cl + 15) <= total)
+            break;
+    }
     a800_closesocket(fd);
     buf[total] = 0;
     if (sscanf(buf, "HTTP/%*s %d", &status) != 1)
@@ -112,7 +127,44 @@ static const char *read_string(const char *p, char *out, size_t outsz)
     return *p == '"' ? p + 1 : NULL;
 }
 
+/* The list, fetched at most twice a second: menus ask for each drive. */
+static pthread_mutex_t s_cache_mtx = PTHREAD_MUTEX_INITIALIZER;
+static fujinet_drive s_cache[16];
+static int s_cache_n = -1;
+static double s_cache_at;
+
+static double now_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static void cache_drop(void)
+{
+    pthread_mutex_lock(&s_cache_mtx);
+    s_cache_n = -1;
+    pthread_mutex_unlock(&s_cache_mtx);
+}
+
+static int fetch_drives(fujinet_drive *out, int max);
+
 int fujinet_api_drives(fujinet_drive *out, int max)
+{
+    int n;
+    pthread_mutex_lock(&s_cache_mtx);
+    if (s_cache_n < 0 || now_s() - s_cache_at > 0.5) {
+        s_cache_n = fetch_drives(s_cache, 16);
+        s_cache_at = now_s();
+    }
+    n = s_cache_n < max ? s_cache_n : max;
+    if (n > 0)
+        memcpy(out, s_cache, (size_t)n * sizeof *out);
+    pthread_mutex_unlock(&s_cache_mtx);
+    return n;
+}
+
+static int fetch_drives(fujinet_drive *out, int max)
 {
     static char body[65536];
     const char *p;
@@ -201,6 +253,7 @@ int fujinet_api_mount(int slot, int host_slot, const char *path, int writable, c
     snprintf(json, sizeof json, "{\"path\":\"%s\",\"host_slot\":%d,\"mode\":\"%s\"}", esc, host_slot,
              writable ? "w" : "r");
     rc = http("POST", url, json, body, sizeof body);
+    cache_drop();
     if (rc == 200)
         return 0;
     if (msg && msgsz > 0) {
@@ -217,6 +270,9 @@ int fujinet_api_mount(int slot, int host_slot, const char *path, int writable, c
 int fujinet_api_eject(int slot)
 {
     char url[64];
+    int rc;
     snprintf(url, sizeof url, "/api/v1/drives/%d/eject", slot);
-    return http("POST", url, "{}", NULL, 0) == 200 ? 0 : -1;
+    rc = http("POST", url, "{}", NULL, 0);
+    cache_drop();
+    return rc == 200 ? 0 : -1;
 }

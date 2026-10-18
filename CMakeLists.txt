@@ -60,3 +60,27 @@ endif()
 if(FRONTEND STREQUAL "windows" OR (FRONTEND STREQUAL "all" AND WIN32))
   add_frontend(windows)
 endif()
+
+# Application icons (rendered from source art by tools/icons/make-icons.py).
+# Desktop environments look the icon up by the desktop-entry id, so the same
+# art is installed under each frontend's id, at every hicolor size. Only for
+# frontends built here: a package should not ship files for an app it does
+# not contain.
+set(A800_ICON_SIZES 16 24 32 48 64 128 192 256 512)
+set(A800_ICON_TARGETS_AND_IDS
+  fujinet-go-atari800-gnome online.fujinet.go.atari800.gnome
+  fujinet-go-atari800-kde online.fujinet.go.atari800.kde)
+list(LENGTH A800_ICON_TARGETS_AND_IDS _a800_icon_n)
+math(EXPR _a800_icon_last "${_a800_icon_n} - 1")
+foreach(_i RANGE 0 ${_a800_icon_last} 2)
+  list(GET A800_ICON_TARGETS_AND_IDS ${_i} _target)
+  math(EXPR _j "${_i} + 1")
+  list(GET A800_ICON_TARGETS_AND_IDS ${_j} _id)
+  if(TARGET ${_target})
+    foreach(_size IN LISTS A800_ICON_SIZES)
+      install(FILES data/icons/hicolor/${_size}x${_size}/apps/fujinet-go-atari800.png
+              DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${_size}x${_size}/apps
+              RENAME ${_id}.png)
+    endforeach()
+  endif()
+endforeach()

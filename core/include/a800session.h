@@ -197,8 +197,8 @@ typedef enum {
 } a800_device;
 const char *a800_device_name(int d);
 int  a800session_port_device(a800session *s, int port);
-/* A paddle from the host (0 = full left .. 228 = full right), port 0-3,
- * paddle 0-1 of the pair. */
+/* A paddle from the host (228 = full left .. 0 = full right, as the POT
+ * counters read), port 0-3, paddle 0-1 of the pair. */
 void a800session_paddle(a800session *s, int port, int paddle, int value, int fire);
 /* The pointer over the picture, in frame pixels, for mice, Koala Pad, light
  * pen and gun (buttons: bit0 left/trigger, bit1 right). */
@@ -324,7 +324,9 @@ typedef enum {
 int a800session_media_kind(a800session *s, const char *path);
 
 /* Open anything: boots a disk, runs a program, inserts a cartridge, loads a
- * tape or a state, imports a ROM. msg says what happened. Returns 0, -1. */
+ * tape or a state, imports a ROM. msg says what happened. Returns 0, -1, or
+ * 1 for a raw cartridge image whose type the user must pick
+ * (cart_needs_type, cart_types_for, then cart_insert with it). */
 int a800session_open(a800session *s, const char *path, char *msg, int msgsz);
 
 /* Disk drives D1-D8. With FujiNet on they are FujiNet's (mounted from the

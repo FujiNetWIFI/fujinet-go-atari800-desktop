@@ -74,6 +74,22 @@ int main(void)
     a800session_copy_frame(s, fb, &w, &h, &par, &serial);
     CHECK(w == 588 && par < 1000, "NTSC filter %dx%d par %d", w, h, par);
 
+    /* paddles beside a mouse, then another machine: the direct mouse the
+       paddles leave must not fail the re-initialisation (it did, and its
+       ErrExit freed twice) */
+    test_set_pref(s, "port1_device", A800_DEV_PADDLES);
+    test_set_pref(s, "port2_device", A800_DEV_ST_MOUSE);
+    a800session_apply_settings(s);
+    test_sleep_ms(300);
+    test_set_pref(s, "machine", A800_M_800);
+    a800session_apply_settings(s);
+    CHECK(test_wait_text(s, "Ready", 4000), "machine change with paddles and a mouse");
+    test_set_pref(s, "port1_device", A800_DEV_JOYSTICK);
+    test_set_pref(s, "port2_device", A800_DEV_JOYSTICK);
+    test_set_pref(s, "machine", A800_M_130XE);
+    a800session_apply_settings(s);
+    CHECK(test_wait_text(s, "Ready", 4000), "back to the 130XE");
+
     /* stop and start again */
     for (i = 0; i < 5; i++) {
         a800session_stop(s);

@@ -175,7 +175,7 @@ static void *watch_main(void *arg)
                     if (start_locked(s) == 0)
                         set_event("FujiNet restarted", NULL);
                     else
-                        set_event("FujiNet could not restart: %s", s->last_error);
+                        set_event("FujiNet could not restart: %.120s", s->last_error);
                 }
             }
             else {

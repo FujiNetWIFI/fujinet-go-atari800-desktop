@@ -257,6 +257,10 @@ bool SessionImpl::CoreInit(std::string& err)
 	PBI_MIO_enabled = PBI_BB_enabled = FALSE;
 	VOICEBOX_enabled = FALSE;
 	PBI_D6D7ram = FALSE;
+	// ApplyPorts sets these after; a direct mouse left from paddles or a
+	// Koala Pad fails INPUT_Initialise, whose ErrExit then frees twice
+	INPUT_direct_mouse = 0;
+	INPUT_mouse_mode = INPUT_MOUSE_OFF;
 	logText.clear();
 	if (!Atari800_Initialise(&argc, argv)) {
 		err = "atari800 did not start";
