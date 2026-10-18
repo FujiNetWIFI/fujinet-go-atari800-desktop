@@ -1,0 +1,108 @@
+From 59dbfe87fc508de67a32ce8c12749901676bc09c Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 23:30:42 -0500
+Subject: [PATCH] NetSIO: netsio_loopback, listen on 127.0.0.1 only and
+ exclusively
+
+---
+ src/netsio.c    | 14 ++++++++------
+ src/netsio.h    |  3 +++
+ src/netsiowin.c |  8 ++++++--
+ 3 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/src/netsio.c b/src/netsio.c
+index 40eb809..03a1521 100644
+--- a/src/netsio.c
++++ b/src/netsio.c
+@@ -31,6 +31,7 @@ static void send_block_to_fujinet(const uint8_t *block, size_t len);
+ 
+ /* Flag to know when netsio is enabled */
+ volatile int netsio_enabled = 0;
++int netsio_loopback = 0;
+ /* Flag to track if NetSIO has been initialized (prevents re-initialization) */
+ static int netsio_initialized = 0;
+ /* Holds sync to fujinet-pc incremented number */
+@@ -274,7 +275,7 @@ int netsio_init(uint16_t port) {
+     
+     addr.sin_family = AF_INET;
+     addr.sin_port = htons(port);
+-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
++    addr.sin_addr.s_addr = htonl(netsio_loopback ? INADDR_LOOPBACK : INADDR_ANY);
+     
+     /* 
+      * Enable broadcast on the socket - required on all platforms
+@@ -289,7 +290,7 @@ int netsio_init(uint16_t port) {
+     }
+ 
+     /* Enable SO_REUSEADDR to allow binding even if the port is in TIME_WAIT state */
+-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
++    if (!netsio_loopback && setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+     {
+ #ifdef DEBUG
+         Log_print("netsio setsockopt SO_REUSEADDR failed");
+@@ -298,7 +299,7 @@ int netsio_init(uint16_t port) {
+ 
+     /* On macOS/BSD, SO_REUSEPORT is required to allow multiple processes to receive on same port */
+ #ifdef SO_REUSEPORT
+-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0)
++    if (!netsio_loopback && setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0)
+     {
+ #ifdef DEBUG
+         Log_print("netsio setsockopt SO_REUSEPORT failed");
+@@ -309,10 +310,11 @@ int netsio_init(uint16_t port) {
+     /* Bind to the socket on requested port */
+     if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+     {
+-#ifdef DEBUG
+-        Log_print("netsio bind socket error");
+-#endif
++        Log_print("netsio: bind port %u failed (%s)", (unsigned)port, strerror(errno));
+         close(sockfd);
++        sockfd = -1;
++        close(fds0[0]);
++        close(fds0[1]);
+         return -1;
+     }
+ 
+diff --git a/src/netsio.h b/src/netsio.h
+index 0af9ea2..39168cb 100644
+--- a/src/netsio.h
++++ b/src/netsio.h
+@@ -3,6 +3,9 @@
+ #define NETSIO_H
+ 
+ extern volatile int netsio_enabled;
++/* Set before netsio_init: listen on 127.0.0.1 only, and refuse a port
++   another process already holds (no SO_REUSEADDR/SO_REUSEPORT). */
++extern int netsio_loopback;
+ 
+ #include <stdint.h>
+ #include <stddef.h>
+diff --git a/src/netsiowin.c b/src/netsiowin.c
+index 1e536de..0c8d353 100644
+--- a/src/netsiowin.c
++++ b/src/netsiowin.c
+@@ -16,6 +16,7 @@
+ 
+ /* State variables (same as netsio.c) */
+ volatile int netsio_enabled = 0;
++int netsio_loopback = 0;
+ static int netsio_initialized = 0;
+ uint8_t netsio_sync_num = 0;
+ int fujinet_known = 0;
+@@ -247,10 +248,13 @@ int netsio_init(uint16_t port)
+     memset(&addr, 0, sizeof(addr));
+     addr.sin_family = AF_INET;
+     addr.sin_port = htons(port);
+-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
++    addr.sin_addr.s_addr = htonl(netsio_loopback ? INADDR_LOOPBACK : INADDR_ANY);
+ 
+     setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (const char *)&broadcast, sizeof(broadcast));
+-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
++    if (netsio_loopback)
++        setsockopt(sockfd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&reuse, sizeof(reuse));
++    else
++        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
+ 
+     if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+         Log_print("netsio: bind port %u failed (error %d, port may be in use)", (unsigned)port, WSAGetLastError());

@@ -177,6 +177,12 @@ static int is_file(const char *p)
     return p && *p && stat(p, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+static int is_dir(const char *p)
+{
+    struct stat st;
+    return p && *p && stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 static int copy_file(const char *src, const char *dst)
 {
     FILE *in = fopen(src, "rb");
@@ -194,26 +200,6 @@ static int copy_file(const char *src, const char *dst)
     return rc;
 }
 
-static int copy_tree(const char *src, const char *dst)
-{
-    if (paths_mkdir_p(dst) != 0) return -1;
-    DIR *d = opendir(src);
-    if (!d) return -1;
-    struct dirent *e;
-    int rc = 0;
-    while ((e = readdir(d)) != NULL) {
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-        char from[A800_PATH_MAX], to[A800_PATH_MAX];
-        snprintf(from, sizeof from, "%s/%s", src, e->d_name);
-        snprintf(to, sizeof to, "%s/%s", dst, e->d_name);
-        struct stat st;
-        if (stat(from, &st) != 0) continue;
-        if (S_ISDIR(st.st_mode)) rc |= copy_tree(from, to);
-        else if (S_ISREG(st.st_mode)) rc |= copy_file(from, to);
-    }
-    closedir(d);
-    return rc;
-}
 
 /* Directory holding the running executable, or "" -- where a Windows install
  * (a folder you copy: fujinet.dll beside the exe) and a macOS bundle (the
@@ -273,6 +259,176 @@ static const char *resolve_lib_dir(struct a800session *s)
     return NULL;
 }
 
+/* ---- keeping the user's runtime tree up to date ----------------------------
+ * <root>/manifest.txt lists every bundled file copied in, with the CRC it
+ * had. On a new bundle (version.txt differs), a file is replaced only if the
+ * user's copy still has that CRC: whatever they edited stays theirs.
+ * fnconfig.ini is copied once and never again; SD/ only gains files. */
+
+static uint32_t file_crc(const char *path, int *ok)
+{
+    uint8_t buf[65536];
+    uint32_t crc = 0xffffffffu;
+    size_t n;
+    FILE *fp = fopen(path, "rb");
+    static uint32_t table[256];
+    static int init;
+    if (!init) {
+        uint32_t i, j, c;
+        for (i = 0; i < 256; i++) {
+            for (c = i, j = 0; j < 8; j++)
+                c = c & 1 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+            table[i] = c;
+        }
+        init = 1;
+    }
+    *ok = fp != NULL;
+    if (!fp)
+        return 0;
+    while ((n = fread(buf, 1, sizeof buf, fp)) > 0) {
+        size_t i;
+        for (i = 0; i < n; i++)
+            crc = table[(crc ^ buf[i]) & 0xff] ^ (crc >> 8);
+    }
+    fclose(fp);
+    return ~crc;
+}
+
+typedef struct {
+    char (*rel)[256];
+    uint32_t *crc;
+    int n, cap;
+} manifest;
+
+static void manifest_add(manifest *m, const char *rel, uint32_t crc)
+{
+    if (m->n == m->cap) {
+        int cap = m->cap ? m->cap * 2 : 64;
+        void *r = realloc(m->rel, (size_t)cap * sizeof *m->rel);
+        void *c = realloc(m->crc, (size_t)cap * sizeof *m->crc);
+        if (!r || !c)
+            return;
+        m->rel = r;
+        m->crc = c;
+        m->cap = cap;
+    }
+    snprintf(m->rel[m->n], sizeof m->rel[m->n], "%s", rel);
+    m->crc[m->n++] = crc;
+}
+
+static int manifest_find(const manifest *m, const char *rel, uint32_t *crc)
+{
+    int i;
+    for (i = 0; i < m->n; i++)
+        if (!strcmp(m->rel[i], rel)) {
+            *crc = m->crc[i];
+            return 1;
+        }
+    return 0;
+}
+
+static void manifest_load(manifest *m, const char *path)
+{
+    char line[400];
+    FILE *fp = fopen(path, "r");
+    if (!fp)
+        return;
+    while (fgets(line, sizeof line, fp)) {
+        unsigned long crc;
+        char rel[300];
+        if (sscanf(line, "%lx %299[^\n]", &crc, rel) == 2)
+            manifest_add(m, rel, (uint32_t)crc);
+    }
+    fclose(fp);
+}
+
+/* Copies src_dir/rel_dir into dst_root, honouring the old manifest. */
+static void provision_dir(const char *src_root, const char *dst_root, const char *rel_dir,
+                          const manifest *old, manifest *now, int add_only)
+{
+    char src[A800_PATH_MAX], dst[A800_PATH_MAX];
+    DIR *d;
+    struct dirent *e;
+    snprintf(src, sizeof src, "%s/%s", src_root, rel_dir);
+    snprintf(dst, sizeof dst, "%s/%s", dst_root, rel_dir);
+    paths_mkdir_p(dst);
+    d = opendir(src);
+    if (!d)
+        return;
+    while ((e = readdir(d)) != NULL) {
+        char rel[512], from[A800_PATH_MAX], to[A800_PATH_MAX];
+        struct stat st;
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+        snprintf(rel, sizeof rel, "%s/%s", rel_dir, e->d_name);
+        snprintf(from, sizeof from, "%s/%s", src_root, rel);
+        snprintf(to, sizeof to, "%s/%s", dst_root, rel);
+        if (stat(from, &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode)) {
+            provision_dir(src_root, dst_root, rel, old, now, add_only);
+        }
+        else if (S_ISREG(st.st_mode)) {
+            int ok_src, ok_dst;
+            uint32_t want = file_crc(from, &ok_src), have, was;
+            if (!ok_src)
+                continue;
+            have = file_crc(to, &ok_dst);
+            if (!ok_dst || (!add_only && manifest_find(old, rel, &was) && was == have))
+                copy_file(from, to);
+            manifest_add(now, rel, want);
+        }
+    }
+    closedir(d);
+}
+
+static void provision_tree(struct a800session *s, const char *asset_src)
+{
+    char path[A800_PATH_MAX], src[A800_PATH_MAX], want[256] = "", have[256] = "";
+    manifest old = {0}, now = {0};
+    FILE *fp;
+    int i;
+
+    paths_mkdir_p(s->fujinet_root);
+    if (!is_file(s->fujinet_config)) {
+        snprintf(src, sizeof src, "%s/fnconfig.ini", asset_src);
+        copy_file(src, s->fujinet_config);
+    }
+    snprintf(src, sizeof src, "%s/upstream-commit.txt", asset_src);
+    if ((fp = fopen(src, "r")) != NULL) {
+        if (!fgets(want, sizeof want, fp))
+            want[0] = 0;
+        fclose(fp);
+    }
+    snprintf(path, sizeof path, "%s/version.txt", s->fujinet_root);
+    if ((fp = fopen(path, "r")) != NULL) {
+        if (!fgets(have, sizeof have, fp))
+            have[0] = 0;
+        fclose(fp);
+    }
+    if (*want && !strcmp(want, have) && is_dir(s->fujinet_data))
+        return;
+
+    snprintf(path, sizeof path, "%s/manifest.txt", s->fujinet_root);
+    manifest_load(&old, path);
+    provision_dir(asset_src, s->fujinet_root, "data", &old, &now, 0);
+    provision_dir(asset_src, s->fujinet_root, "SD", &old, &now, 1);
+    if ((fp = fopen(path, "w")) != NULL) {
+        for (i = 0; i < now.n; i++)
+            fprintf(fp, "%08lx %s\n", (unsigned long)now.crc[i], now.rel[i]);
+        fclose(fp);
+    }
+    snprintf(path, sizeof path, "%s/version.txt", s->fujinet_root);
+    if ((fp = fopen(path, "w")) != NULL) {
+        fputs(want, fp);
+        fclose(fp);
+    }
+    free(old.rel);
+    free(old.crc);
+    free(now.rel);
+    free(now.crc);
+}
+
 int paths_provision_fujinet(struct a800session *s)
 {
     const char *libdir = resolve_lib_dir(s);
@@ -304,16 +460,7 @@ int paths_provision_fujinet(struct a800session *s)
         if (is_file(probe)) { snprintf(asset_src, sizeof asset_src, "%s", cands[i]); break; }
     }
 
-    /* First run: copy fnconfig.ini + data/ + SD/ into the user's tree. */
-    if (*asset_src && !is_file(s->fujinet_config)) {
-        char src[A800_PATH_MAX];
-        paths_mkdir_p(s->fujinet_root);
-        snprintf(src, sizeof src, "%s/fnconfig.ini", asset_src);
-        copy_file(src, s->fujinet_config);
-        snprintf(src, sizeof src, "%s/data", asset_src);
-        copy_tree(src, s->fujinet_data);
-        snprintf(src, sizeof src, "%s/SD", asset_src);
-        copy_tree(src, s->fujinet_sd);
-    }
+    if (*asset_src)
+        provision_tree(s, asset_src);
     return 0;
 }

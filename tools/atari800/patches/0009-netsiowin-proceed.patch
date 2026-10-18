@@ -1,0 +1,64 @@
+From b38a406a34bcd7d90d85fb6671a7460f42e425c8 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 23:30:42 -0500
+Subject: [PATCH] NetSIO on Windows: honour PROCEED and INTERRUPT
+
+---
+ src/netsiowin.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/src/netsiowin.c b/src/netsiowin.c
+index 0c8d353..ea23748 100644
+--- a/src/netsiowin.c
++++ b/src/netsiowin.c
+@@ -13,10 +13,15 @@
+ #include <windows.h>
+ #include "netsio.h"
+ #include "log.h"
++#include "pia.h" /* For toggling PROC & INT */
+ 
+ /* State variables (same as netsio.c) */
+ volatile int netsio_enabled = 0;
+ int netsio_loopback = 0;
++
++/* PIA pin states, buffered for the emulation thread */
++static volatile int netsio_ca1_state = 1;
++static volatile int netsio_cb1_state = 1;
+ static int netsio_initialized = 0;
+ uint8_t netsio_sync_num = 0;
+ int fujinet_known = 0;
+@@ -192,10 +197,18 @@ static DWORD WINAPI fujinet_rx_thread(LPVOID arg)
+                 netsio_sync_wait = 0;
+                 break;
+             }
++            /* applied by netsio_poll on the emulation thread */
+             case NETSIO_PROCEED_ON:
++                netsio_ca1_state = 0; /* Active low */
++                break;
+             case NETSIO_PROCEED_OFF:
++                netsio_ca1_state = 1;
++                break;
+             case NETSIO_INTERRUPT_ON:
++                netsio_cb1_state = 0;
++                break;
+             case NETSIO_INTERRUPT_OFF:
++                netsio_cb1_state = 1;
+                 break;
+             case NETSIO_DATA_BYTE: {
+                 if (n < 2) break;
+@@ -551,10 +564,13 @@ void netsio_test_cmd(void)
+ }
+ 
+ /* netsio_poll: called from POKEY_Scanline() to apply buffered PROCEED/INTERRUPT
+- * pin states.  The Windows implementation does not yet track these signals, so
+- * this is a no-op stub. */
++ * pin states. */
+ void netsio_poll(void)
+ {
++    if (netsio_enabled) {
++        PIA_SetCA1(netsio_ca1_state);
++        PIA_SetCB1(netsio_cb1_state);
++    }
+ }
+ 
+ /* netsio_cmd_cancel: called from sio.c when a command frame is too short or

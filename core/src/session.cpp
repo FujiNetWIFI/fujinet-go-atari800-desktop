@@ -40,6 +40,7 @@ extern "C" {
 #include "input.h"
 #include "log.h"
 #include "memory.h"
+#include "netsio.h"
 #include "pokeysnd.h"
 #include "sio.h"
 #include "sound.h"
@@ -84,8 +85,10 @@ a800session* a800session_new(const a800session_paths* paths)
 		free(s);
 		return nullptr;
 	}
-	if (paths && paths->fujinet_lib)
+	if (paths && paths->fujinet_lib) {
 		snprintf(s->fujinet_lib, sizeof s->fujinet_lib, "%s", paths->fujinet_lib);
+		s->fujinet_disabled = !*paths->fujinet_lib;
+	}
 	if (paths && paths->fujinet_runtime_src)
 		snprintf(s->fujinet_runtime_src, sizeof s->fujinet_runtime_src, "%s",
 		         paths->fujinet_runtime_src);
@@ -258,6 +261,18 @@ bool SessionImpl::CoreInit(std::string& err)
 		return false;
 	}
 	coreUp = true;
+	if (s->fujinet_wanted) {
+		// the hub is bound before FujiNet starts: FujiNet pings it first
+		netsio_loopback = 1;
+		if (netsio_init(A800SESSION_NETSIO_PORT) != 0) {
+			Notice("FujiNet is off: NetSIO port " + std::to_string(A800SESSION_NETSIO_PORT)
+			       + " is in use (another copy of this app?)");
+			s->fujinet_wanted = 0;
+		}
+	}
+	else {
+		netsio_enabled = 0;
+	}
 	ApplyLive();
 	RemountMedia();
 	ColdStart();
@@ -406,13 +421,19 @@ int a800session_start(a800session* s, const a800session_start_opts* opts)
 	s->fujinet_wanted = s->opts.enable_fujinet && session_fujinet_available(s);
 
 	std::string err;
+	// with FujiNet, the Atari stays off until FujiNet is there to boot it
+	im->host.SetPowered(!s->fujinet_wanted);
 	if (!im->host.Start(err)) {
 		session_set_error(s, "%s", err.c_str());
 		return -1;
 	}
 	s->running = 1;
-	if (s->fujinet_wanted)
-		session_fujinet_start(s);
+	if (s->fujinet_wanted) {
+		if (session_fujinet_start(s) == 0 && !session_fujinet_wait_link(s, 4000))
+			im->Notice("FujiNet has not connected yet");
+		im->host.Call([im] { im->ColdStart(); });
+		im->host.SetPowered(true);
+	}
 	if (s->opts.enable_gamepad)
 		gamepad_start(s);
 	if (s->opts.enable_audio && audio_start(s) != 0)
@@ -856,6 +877,20 @@ int a800session_sysaction_take(a800session* s, int* out)
 		}
 	pthread_mutex_unlock(&s->sysact_mtx);
 	return rc;
+}
+
+// ---- the NetSIO link ------------------------------------------------------------
+
+int a800session_fujinet_link(a800session* s)
+{
+	return s->fujinet_wanted && netsio_enabled ? 1 : 0;
+}
+
+void session_fujinet_link_lost(struct a800session* s)
+{
+	(void)s;
+	// a FujiNet that stopped does not always say so
+	netsio_enabled = 0;
 }
 
 // ---- gamepads ------------------------------------------------------------------

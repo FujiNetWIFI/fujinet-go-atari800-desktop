@@ -35,6 +35,9 @@ static void audio_cb(void *ud, SDL_AudioStream *stream, int additional_amount,
         /* render_audio zero-fills any shortfall itself: an underrun plays as
          * a gap, never as a buzz from stale buffer contents. */
         a800session_render_audio(s, buf, want_frames);
+        /* SAM speech from FujiNet's voice device */
+        session_fujinet_mix(s, buf, want_frames,
+                            a800session_get_int(s, "volume", 80) / 100.0f);
         SDL_PutAudioStreamData(stream, buf, want_frames * (int)(2 * sizeof(float)));
         additional_amount -= want_frames * (int)(2 * sizeof(float));
     }

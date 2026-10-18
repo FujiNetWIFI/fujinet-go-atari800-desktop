@@ -34,6 +34,9 @@ include(cmake/Atari800Core.cmake)
 enable_testing()
 add_subdirectory(core)
 
+# Set up before the frontends so the macOS bundle can depend on it.
+include(cmake/FujiNetRuntime.cmake)
+
 function(add_frontend name)
   if(NOT EXISTS "${CMAKE_SOURCE_DIR}/frontends/${name}/CMakeLists.txt")
     if(FRONTEND STREQUAL name)

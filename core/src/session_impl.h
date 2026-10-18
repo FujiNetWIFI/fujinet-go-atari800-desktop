@@ -107,12 +107,6 @@ struct SessionImpl
 SessionImpl* Impl(a800session* s);
 
 extern "C" {
-/* fujinet_runtime.c */
-int  session_fujinet_available(struct a800session* s);
-int  session_fujinet_start(struct a800session* s);
-void session_fujinet_stop(struct a800session* s);
-void session_fujinet_restart_for_power(struct a800session* s);
-void session_fujinet_power_cycled(struct a800session* s);
 /* input.cpp */
 int  session_binding_target_for_key(struct a800session* s, uint32_t keysym);
 /* debug.cpp */

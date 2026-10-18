@@ -58,6 +58,7 @@ struct a800session {
     char webui_url[64];
     int  fujinet_running;
     int  fujinet_wanted;                    /* FujiNet enabled for this run */
+    int  fujinet_disabled;                  /* the caller said no FujiNet ("" lib) */
 
     pthread_mutex_t sysact_mtx;
     unsigned sysact_pending;
@@ -97,6 +98,16 @@ const char *roms_path(struct a800session *s, int slot);
 uint32_t roms_crc32(const uint8_t *p, size_t n);
 int  roms_identify_file(const char *path);
 void roms_provision_embedded(struct a800session *s);
+
+/* fujinet_runtime.c, and the NetSIO link (session.cpp) */
+int  session_fujinet_available(struct a800session *s);
+int  session_fujinet_start(struct a800session *s);
+void session_fujinet_stop(struct a800session *s);
+void session_fujinet_restart_for_power(struct a800session *s);
+void session_fujinet_power_cycled(struct a800session *s);
+int  session_fujinet_wait_link(struct a800session *s, int timeout_ms);
+void session_fujinet_mix(struct a800session *s, float *stereo, int frames, float gain);
+void session_fujinet_link_lost(struct a800session *s);
 
 /* audio_sdl.c, gamepad_sdl.c */
 int  audio_start(struct a800session *s);
