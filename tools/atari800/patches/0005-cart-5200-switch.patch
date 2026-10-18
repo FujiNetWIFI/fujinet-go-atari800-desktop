@@ -1,7 +1,7 @@
-From 1e4f4c056a609e642b8d0ebffbc832c80b70bda0 Mon Sep 17 00:00:00 2001
+From 0781d937149d14923e8eafebde2079eaa1d084e5 Mon Sep 17 00:00:00 2001
 From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
 Date: Sat, 17 Oct 2026 22:53:01 -0500
-Subject: [PATCH] CARTRIDGE_allow_5200_switch: let a host refuse the 5200
+Subject: [PATCH 5/7] CARTRIDGE_allow_5200_switch: let a host refuse the 5200
  switch
 
 ---

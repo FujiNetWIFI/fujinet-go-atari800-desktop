@@ -79,10 +79,12 @@ int Atari_POT(int num)
 }
 #endif
 
-void PLATFORM_PaletteUpdate(void)
+void PLATFORM_PaletteUpdate(void) {}
+
+void PLATFORM_ConfigInit(void)
 {
-	if (cbs.palette)
-		cbs.palette(cbs.user);
+	if (cbs.config)
+		cbs.config(cbs.user);
 }
 
 double PLATFORM_Time(void)

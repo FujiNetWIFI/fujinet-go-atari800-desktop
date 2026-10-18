@@ -21,7 +21,7 @@ a800_provide_dependency(
 set(ATARI800_GEN "${CMAKE_BINARY_DIR}/atari800-generated")
 set(ATARI800_STOCK "${CMAKE_BINARY_DIR}/atari800-stock")
 
-file(GLOB ATARI800_PATCHES "${CMAKE_SOURCE_DIR}/tools/atari800/patches/*.patch")
+file(GLOB ATARI800_PATCHES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/atari800/patches/*.patch")
 list(SORT ATARI800_PATCHES)
 
 set(_a8_head "")

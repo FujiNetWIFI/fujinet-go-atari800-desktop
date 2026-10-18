@@ -35,6 +35,7 @@ function(a800_add_core target gen)
   endforeach()
   list(APPEND _src
     "${ATARI800_HOST_DIR}/host/platform.c"
+    "${ATARI800_HOST_DIR}/host/video.c"
     "${ATARI800_HOST_DIR}/host/ui_stub.c"
     "${ATARI800_HOST_DIR}/host/file_export_stub.c")
   add_library(${target} STATIC ${_src})

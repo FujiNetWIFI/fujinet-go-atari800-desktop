@@ -16,8 +16,9 @@ typedef struct a8host_callbacks {
 	/* A break (breakpoint, step, BRK, CIM): park until the debugger
 	   resumes. The CPU registers are already synced to CPU_reg*. */
 	void (*brk)(void *user);
-	/* Colours_table changed. */
-	void (*palette)(void *user);
+	/* Inside Atari800_Initialise, where atari800 would read its config
+	   file (PLATFORM_ConfigInit): apply the host's options. */
+	void (*config)(void *user);
 	void *user;
 } a8host_callbacks;
 

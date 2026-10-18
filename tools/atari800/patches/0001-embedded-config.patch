@@ -1,14 +1,15 @@
-From beb696c02e85ee19742d5b1532c354c85e310038 Mon Sep 17 00:00:00 2001
+From 220d6312bf877450ed3462d290956814ec38090e Mon Sep 17 00:00:00 2001
 From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
-Date: Sat, 17 Oct 2026 22:52:29 -0500
-Subject: [PATCH] Embedded builds: no config file, portable probe or ROM scan
+Date: Sat, 17 Oct 2026 23:06:16 -0500
+Subject: [PATCH 1/7] Embedded builds: no config file, portable probe or ROM
+ scan
 
 ---
- src/atari.c | 9 ++++++---
- 1 file changed, 6 insertions(+), 3 deletions(-)
+ src/atari.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/atari.c b/src/atari.c
-index 96c9562..d5f042a 100644
+index 96c9562..5e97042 100644
 --- a/src/atari.c
 +++ b/src/atari.c
 @@ -433,7 +433,7 @@ int Atari800_Initialise(int *argc, char *argv[])
@@ -20,13 +21,16 @@ index 96c9562..d5f042a 100644
  	if (*argc > 1) {
  		for (i = j = 1; i < *argc; i++) {
  			if (strcmp(argv[i], "-config") == 0) {
-@@ -502,8 +502,11 @@ int Atari800_Initialise(int *argc, char *argv[])
+@@ -502,8 +502,14 @@ int Atari800_Initialise(int *argc, char *argv[])
  #endif
  	}
  #else
 -	got_config = TRUE; /* pretend we got a config file -- not needed in Android */
 -#endif /* ANDROID */
 +	got_config = TRUE; /* the host owns configuration (Android, embedded builds) */
++#if defined(ATARI800_EMBEDDED) && defined(SUPPORTS_PLATFORM_CONFIGINIT)
++	PLATFORM_ConfigInit(); /* where the host applies its options (CFG_ApplyOption) */
++#endif
 +	(void) cfg_source_path;
 +	(void) atari800_exe_dir;
 +	(void) portable_cfg;

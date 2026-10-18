@@ -1,0 +1,52 @@
+From 9af4865b233c32337fcb428cc0113d766741b5a9 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 23:05:32 -0500
+Subject: [PATCH 7/7] XLD, Proto80: no dangling ROM pointer when the ROM is
+ missing
+
+---
+ src/pbi_proto80.c | 1 +
+ src/pbi_xld.c     | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/src/pbi_proto80.c b/src/pbi_proto80.c
+index ca92b54..5994b75 100644
+--- a/src/pbi_proto80.c
++++ b/src/pbi_proto80.c
+@@ -66,6 +66,7 @@ int PBI_PROTO80_Initialise(int *argc, char *argv[])
+ 		proto80rom = (UBYTE *)Util_malloc(0x800);
+ 		if (!Atari800_LoadImage(proto80_rom_filename, proto80rom, 0x800)) {
+ 			free(proto80rom);
++			proto80rom = NULL;
+ 			PBI_PROTO80_enabled = FALSE;
+ 			Log_print("Couldn't load proto80 rom image");
+ 			return FALSE;
+diff --git a/src/pbi_xld.c b/src/pbi_xld.c
+index e8e7309..790f01b 100644
+--- a/src/pbi_xld.c
++++ b/src/pbi_xld.c
+@@ -86,6 +86,7 @@ static void init_xld_v(void)
+ 	voicerom = (UBYTE *)Util_malloc(0x1000);
+ 	if (!Atari800_LoadImage(xld_v_rom_filename, voicerom, 0x1000)) {
+ 		free(voicerom);
++		voicerom = NULL;
+ 		PBI_XLD_v_enabled = FALSE;
+ 	}
+ 	else {
+@@ -100,6 +101,7 @@ static void init_xld_d(void)
+ 	diskrom = (UBYTE *)Util_malloc(0x800);
+ 	if (!Atari800_LoadImage(xld_d_rom_filename, diskrom, 0x800)) {
+ 		free(diskrom);
++		diskrom = NULL;
+ 		xld_d_enabled = FALSE;
+ 	}
+ 	else {
+@@ -263,6 +265,8 @@ int PBI_XLD_D1ffPutByte(UBYTE byte)
+ 		memcpy(MEMORY_mem + 0xd800, diskrom, 0x800);
+ 		D(printf("DISK rom activated\n"));
+ 	} 
++	else if (voicerom == NULL && (byte == MODEM_MASK || byte == VOICE_MASK))
++		result = PBI_NOT_HANDLED;
+ 	else if (byte == MODEM_MASK) {
+ 		memcpy(MEMORY_mem + 0xd800, voicerom + 0x800, 0x800);
+ 		D(printf("MODEM rom activated\n"));

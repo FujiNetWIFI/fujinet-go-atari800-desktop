@@ -1,7 +1,7 @@
-From c234d18c6d9da4a0a93e10aeb9cb335e4e83b98c Mon Sep 17 00:00:00 2001
+From 283685c8a7daf035bc41349649766d4224d6dc6f Mon Sep 17 00:00:00 2001
 From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
 Date: Sat, 17 Oct 2026 22:52:29 -0500
-Subject: [PATCH] Atari800_host_paced: let an embedding host pace frames
+Subject: [PATCH 2/7] Atari800_host_paced: let an embedding host pace frames
 
 ---
  src/atari.c | 5 +++++
@@ -9,7 +9,7 @@ Subject: [PATCH] Atari800_host_paced: let an embedding host pace frames
  2 files changed, 9 insertions(+)
 
 diff --git a/src/atari.c b/src/atari.c
-index d5f042a..5d69cdc 100644
+index 5e97042..ac0f49a 100644
 --- a/src/atari.c
 +++ b/src/atari.c
 @@ -182,6 +182,7 @@ int Atari800_nframes = 0;
@@ -20,7 +20,7 @@ index d5f042a..5d69cdc 100644
  int Atari800_turbo_speed = 0; /* percentage speed or 0 for max turbo */
  int Atari800_start_in_monitor = FALSE;
  int Atari800_auto_frameskip = FALSE;
-@@ -1567,6 +1568,10 @@ void Atari800_Frame(void)
+@@ -1570,6 +1571,10 @@ void Atari800_Frame(void)
  	}
  #else
  
