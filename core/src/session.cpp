@@ -765,6 +765,37 @@ void SessionImpl::UpdateKey()
 	keyShift.store(modShift ? 1 : 0);
 }
 
+static int cx85_code(uint32_t keysym)
+{
+	switch (keysym) {
+	case A800_KEYSYM_KP_0: return AKEY_CX85_0;
+	case A800_KEYSYM_KP_1: return AKEY_CX85_1;
+	case A800_KEYSYM_KP_2: return AKEY_CX85_2;
+	case A800_KEYSYM_KP_3: return AKEY_CX85_3;
+	case A800_KEYSYM_KP_4: return AKEY_CX85_4;
+	case A800_KEYSYM_KP_5: return AKEY_CX85_5;
+	case A800_KEYSYM_KP_6: return AKEY_CX85_6;
+	case A800_KEYSYM_KP_7: return AKEY_CX85_7;
+	case A800_KEYSYM_KP_8: return AKEY_CX85_8;
+	case A800_KEYSYM_KP_9: return AKEY_CX85_9;
+	case A800_KEYSYM_KP_PERIOD: return AKEY_CX85_PERIOD;
+	case A800_KEYSYM_KP_SUBTRACT: return AKEY_CX85_MINUS;
+	case A800_KEYSYM_KP_ENTER:
+	case A800_KEYSYM_KP_ADD: return AKEY_CX85_PLUS_ENTER;
+	case A800_KEYSYM_KP_DIVIDE: return AKEY_CX85_ESCAPE;
+	case A800_KEYSYM_KP_MULTIPLY: return AKEY_CX85_DELETE;
+	default: return AKEY_NONE;
+	}
+}
+
+bool SessionImpl::cx85Fitted()
+{
+	for (int p = 0; p < A800_PORTS; p++)
+		if (PortDevice(p) == A800_DEV_CX85)
+			return true;
+	return false;
+}
+
 int a800session_key(a800session* s, uint32_t keysym, uint32_t unicode, int down)
 {
 	SessionImpl* im = Impl(s);
@@ -782,6 +813,20 @@ int a800session_key(a800session* s, uint32_t keysym, uint32_t unicode, int down)
 			im->modShift = down ? (im->modShift | bit) : (im->modShift & ~bit);
 		else
 			im->modCtrl = down ? (im->modCtrl | bit) : (im->modCtrl & ~bit);
+		im->UpdateKey();
+		return 1;
+	}
+	// a CX85 keypad on a port takes the host's numeric keypad
+	int cx85 = cx85_code(keysym);
+	if (cx85 != AKEY_NONE && im->cx85Fitted()) {
+		if (down) {
+			im->held.push_back({keysym, cx85});
+		}
+		else {
+			im->held.erase(std::remove_if(im->held.begin(), im->held.end(),
+			                              [&](const SessionImpl::Held& h) { return h.keysym == keysym; }),
+			               im->held.end());
+		}
 		im->UpdateKey();
 		return 1;
 	}

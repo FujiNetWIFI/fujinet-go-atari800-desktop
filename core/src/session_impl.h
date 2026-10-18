@@ -75,6 +75,7 @@ struct SessionImpl
 	std::atomic<bool> fkeys1200 { false };
 	std::atomic<int> oskKey { -1 };             // on-screen keyboard's
 	void UpdateKey();
+	bool cx85Fitted();
 
 	// ---- paste
 	std::mutex pasteMtx;
