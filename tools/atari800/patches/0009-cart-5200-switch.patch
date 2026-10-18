@@ -1,0 +1,55 @@
+From 1e4f4c056a609e642b8d0ebffbc832c80b70bda0 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 22:53:01 -0500
+Subject: [PATCH] CARTRIDGE_allow_5200_switch: let a host refuse the 5200
+ switch
+
+---
+ src/cartridge.c | 10 +++++++---
+ src/cartridge.h |  5 +++++
+ 2 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/cartridge.c b/src/cartridge.c
+index 7ece28a..43b4864 100644
+--- a/src/cartridge.c
++++ b/src/cartridge.c
+@@ -52,7 +52,9 @@
+ 
+ int CARTRIDGE_autoreboot = TRUE;
+ 
+-static int CartIsFor5200(int type)
++int CARTRIDGE_allow_5200_switch = TRUE;
++
++int CARTRIDGE_IsFor5200(int type)
+ {
+ 	switch (type) {
+ 	case CARTRIDGE_5200_32:
+@@ -1590,8 +1592,10 @@ static void InitCartridge(CARTRIDGE_image_t *cart)
+ 	ResetCartState(cart);
+ 	if (cart == &CARTRIDGE_main) {
+ 		/* Check if we should automatically switch between computer/5200. */
+-		int for5200 = CartIsFor5200(CARTRIDGE_main.type);
+-		if (for5200 && Atari800_machine_type != Atari800_MACHINE_5200) {
++		int for5200 = CARTRIDGE_IsFor5200(CARTRIDGE_main.type);
++		if (!CARTRIDGE_allow_5200_switch)
++			;
++		else if (for5200 && Atari800_machine_type != Atari800_MACHINE_5200) {
+ 			Atari800_SetMachineType(Atari800_MACHINE_5200);
+ 			MEMORY_ram_size = 16;
+ 			Atari800_InitialiseMachine();
+diff --git a/src/cartridge.h b/src/cartridge.h
+index 4209b2a..72e638d 100644
+--- a/src/cartridge.h
++++ b/src/cartridge.h
+@@ -10,6 +10,11 @@
+    cartridge - in this case system will never autoreboot.) */
+ extern int CARTRIDGE_autoreboot;
+ 
++/* FALSE stops a 5200 cartridge from switching the machine type (and a
++   computer cartridge from switching a 5200 back). */
++extern int CARTRIDGE_allow_5200_switch;
++int CARTRIDGE_IsFor5200(int type);
++
+ /*
+  * Ram-Cart state flag bits meaning:
+  * ---------------------------------

@@ -1,0 +1,48 @@
+From c234d18c6d9da4a0a93e10aeb9cb335e4e83b98c Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 22:52:29 -0500
+Subject: [PATCH] Atari800_host_paced: let an embedding host pace frames
+
+---
+ src/atari.c | 5 +++++
+ src/atari.h | 4 ++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/src/atari.c b/src/atari.c
+index d5f042a..5d69cdc 100644
+--- a/src/atari.c
++++ b/src/atari.c
+@@ -182,6 +182,7 @@ int Atari800_nframes = 0;
+ int Atari800_refresh_rate = 1;
+ int Atari800_collisions_in_skipped_frames = FALSE;
+ int Atari800_turbo = FALSE;
++int Atari800_host_paced = FALSE;
+ int Atari800_turbo_speed = 0; /* percentage speed or 0 for max turbo */
+ int Atari800_start_in_monitor = FALSE;
+ int Atari800_auto_frameskip = FALSE;
+@@ -1567,6 +1568,10 @@ void Atari800_Frame(void)
+ 	}
+ #else
+ 
++	if (Atari800_host_paced) {
++		/* the host paces frames itself */
++	}
++	else
+ #ifdef ALTERNATE_SYNC_WITH_HOST
+ 	if (refresh_counter == 0)
+ #endif
+diff --git a/src/atari.h b/src/atari.h
+index f6ded23..16fab06 100644
+--- a/src/atari.h
++++ b/src/atari.h
+@@ -120,6 +120,10 @@ extern int Atari800_collisions_in_skipped_frames;
+ 
+ /* Set to TRUE to run emulated Atari as fast as possible */
+ extern int Atari800_turbo;
++
++/* Set by an embedding host that paces frames itself: Atari800_Frame then
++   skips Atari800_Sync. */
++extern int Atari800_host_paced;
+ /* Percentage speed or 0 for max turbo */
+ extern int Atari800_turbo_speed;
+ 

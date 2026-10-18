@@ -1,0 +1,24 @@
+From a3ae93075ace060b871cb31b40f706340900cae8 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 22:52:54 -0500
+Subject: [PATCH] Black Box: don't crash when the ROM file is missing
+
+---
+ src/pbi_bb.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/pbi_bb.c b/src/pbi_bb.c
+index 22ac61c..0c1d815 100644
+--- a/src/pbi_bb.c
++++ b/src/pbi_bb.c
+@@ -64,6 +64,10 @@ static void init_bb(void)
+ {
+ 	FILE *bbfp;
+ 	bbfp = fopen(bb_rom_filename,"rb");
++	if (bbfp == NULL) {
++		Log_print("Couldn't open black box rom %s", bb_rom_filename);
++		return;
++	}
+ 	bb_rom_size = Util_flen(bbfp);
+ 	fclose(bbfp);
+ 	if (bb_rom_size != 0x10000 && bb_rom_size != 0x4000) {

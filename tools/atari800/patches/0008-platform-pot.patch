@@ -1,0 +1,22 @@
+From 1c5441cbe1ebb82e29a64c697e95e1ffb558db68 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sat, 17 Oct 2026 22:52:54 -0500
+Subject: [PATCH] PLATFORM_POT: let any platform supply Atari_POT
+
+---
+ src/input.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/input.h b/src/input.h
+index d106c75..0ae4427 100644
+--- a/src/input.h
++++ b/src/input.h
+@@ -92,7 +92,7 @@ int INPUT_PlaybackInt(void);
+ 
+ #ifdef DREAMCAST
+ extern int Atari_POT(int);
+-#elif SDL2
++#elif defined(SDL2) || defined(PLATFORM_POT)
+ extern int Atari_POT(int);
+ #else
+ #define Atari_POT(x) 228

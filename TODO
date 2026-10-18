@@ -1,0 +1,13 @@
+FujiNet Go Atari 800 desktop -- milestones (plan: build-a-new-fujinet-calm-valley)
+
+[x] M0  skeleton, staged + patched atari800 core, headless runner, boot + A/B tests, icons
+[ ] M1  session without FujiNet: host thread, pacing, audio, video blits, models, ROM import
+[ ] M2  FujiNet over NetSIO: runtime build, patches, watchdog, provisioning, SAM, auto-update pin
+[ ] M3  media + REST: open/drives/cartridge/tape/states, import to SD
+[ ] M4  input: keymap, on-screen keyboard, paste, bindings, gamepads, paddles, mice
+[ ] M5  debugger engine
+[ ] M6  GNOME
+[ ] M7  KDE
+[ ] M8  Windows
+[ ] M9  macOS
+[ ] M10 packaging, CI, release

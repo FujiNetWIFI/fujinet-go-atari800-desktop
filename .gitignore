@@ -1,0 +1,28 @@
+# build trees (build-aux/ is source)
+build*/
+!build-aux/
+
+# provisioned at their pins by cmake/Dependencies.cmake
+third_party/
+
+# FujiNet runtime build tree
+tools/fujinet/work/
+
+# ROM and media images that stray in while testing; tools/roms holds a
+# developer's own images for WITH_ATARI800_ROMS builds (see COMPLIANCE.md)
+*.rom
+*.ROM
+*.bin
+*.atr
+*.xex
+*.car
+*.cas
+*.a8s
+tools/roms/*
+!tools/roms/embed-roms.py
+
+.cache/
+compile_commands.json
+.flatpak-builder/
+__pycache__/
+*.pyc
