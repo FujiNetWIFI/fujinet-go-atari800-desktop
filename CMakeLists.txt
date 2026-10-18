@@ -84,3 +84,65 @@ foreach(_i RANGE 0 ${_a800_icon_last} 2)
     endforeach()
   endif()
 endforeach()
+
+# A published build carries no Atari ROM: every frontend binary is checked
+# against the images a developer keeps in tools/roms. SKIPs (77) when there
+# are none to probe with, as in every CI and release checkout.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND AND NOT WITH_ATARI800_ROMS)
+  foreach(_t fujinet-go-atari800-gnome fujinet-go-atari800-kde
+             fujinet-go-atari800-windows fujinet-go-atari800-macos)
+    if(TARGET ${_t})
+      add_test(NAME no_embedded_roms_${_t}
+               COMMAND "${Python3_EXECUTABLE}"
+                       "${CMAKE_SOURCE_DIR}/core/tests/no_embedded_roms.py"
+                       "$<TARGET_FILE:${_t}>"
+                       "${CMAKE_SOURCE_DIR}/tools/roms")
+      set_tests_properties(no_embedded_roms_${_t} PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+  endforeach()
+endif()
+
+# ---- packaging --------------------------------------------------------
+#
+# One package per frontend, not one package for both: GNOME (GTK4/libadwaita)
+# and KDE (Qt6) pull in entirely different runtime library stacks, and a user
+# who wants one should not be made to depend on the other.
+if(FRONTEND STREQUAL "gnome")
+  set(CPACK_PACKAGE_NAME "fujinet-go-atari800-gnome")
+elseif(FRONTEND STREQUAL "kde")
+  set(CPACK_PACKAGE_NAME "fujinet-go-atari800-kde")
+else()
+  set(CPACK_PACKAGE_NAME "fujinet-go-atari800")
+endif()
+
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VENDOR "FujiNet")
+set(CPACK_PACKAGE_CONTACT "https://github.com/FujiNetWIFI/fujinet-go-atari800-desktop/issues")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://fujinet.online/")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "The Atari 400, 800, XL and XE computers with a built-in FujiNet")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_STRIP_FILES ON)
+
+if(UNIX AND NOT APPLE)
+  set(CPACK_GENERATOR "DEB;RPM;TGZ")
+
+  # Auto-detected from the actual linked libraries (dpkg-shlibdeps /
+  # rpmbuild's own dependency generator) rather than hand-listed: GTK4 vs Qt6
+  # alone makes one fixed list wrong for whichever frontend was not built.
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+  set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+  set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
+  # libfujinet sits in a private directory the binary finds by itself
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+      "${CMAKE_INSTALL_FULL_LIBDIR}/fujinet-go-atari800")
+
+  set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+  set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+  set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
+  set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")
+endif()
+
+include(CPack)

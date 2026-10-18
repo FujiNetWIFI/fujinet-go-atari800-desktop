@@ -103,10 +103,16 @@ ensure_mbedtls() {
     fi
     if [[ ! -f "${MBEDTLS_INSTALL_DIR}/lib/libmbedtls.a" ]]; then
         echo "Building pinned mbedTLS ${MBEDTLS_TAG}"
-        rm -rf "${MBEDTLS_SOURCE_DIR}" "${MBEDTLS_BUILD_DIR}" "${MBEDTLS_INSTALL_DIR}"
-        git clone --depth 1 --branch "${MBEDTLS_TAG}" --recurse-submodules \
-            --shallow-submodules https://github.com/Mbed-TLS/mbedtls.git \
-            "${MBEDTLS_SOURCE_DIR}"
+        rm -rf "${MBEDTLS_BUILD_DIR}" "${MBEDTLS_INSTALL_DIR}"
+        if [[ ! -f "${MBEDTLS_SOURCE_DIR}/CMakeLists.txt" ]]; then
+            # A flatpak build pre-fetches this exact tag as a declared
+            # source (build-aux/flatpak/*.yml): the sandboxed build step has
+            # no network, so only clone when that hasn't dropped one here.
+            rm -rf "${MBEDTLS_SOURCE_DIR}"
+            git clone --depth 1 --branch "${MBEDTLS_TAG}" --recurse-submodules \
+                --shallow-submodules https://github.com/Mbed-TLS/mbedtls.git \
+                "${MBEDTLS_SOURCE_DIR}"
+        fi
         python3 - "${MBEDTLS_SOURCE_DIR}/include/mbedtls/mbedtls_config.h" <<'PY'
 from pathlib import Path
 import sys

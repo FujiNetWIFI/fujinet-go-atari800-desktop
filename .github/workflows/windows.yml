@@ -1,0 +1,92 @@
+name: Windows
+
+# Native MSYS2/UCRT64: the core, the session layer, the FujiNet runtime, the
+# test suite and the Win32 frontend.
+#
+# NetSIO on Windows is atari800's netsiowin.c (Winsock, patch 0009 buffers
+# PROCEED/INTERRUPT for it); the core's threads are winpthreads.
+#
+# The mingw-w64 cross-compile in cmake/toolchains/ is the desk-side check for
+# all of this: the whole app cross-builds, fujinet.dll and the exe import only
+# Windows system DLLs, and the tests pass under Wine. THIS workflow is the
+# real native build.
+#
+# -DWITH_ATARI800_ROMS=OFF, as every published build. WITH_FUJINET is left at
+# its default ON to prove the MSYS2 runtime build works here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+            patch
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-expat
+            mingw-w64-ucrt-x86_64-gdb
+
+      - name: Confirm the packaged SDL3 is on the 3.x line
+        run: pacman -Q mingw-w64-ucrt-x86_64-sdl3 | grep -qE ' 3\.[0-9]+\.[0-9]+-'
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DWITH_ATARI800_ROMS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -LE network
+
+      # A crash on a runner we cannot sit at is only diagnosable with a
+      # backtrace: re-run every failing test under gdb and print it.
+      - name: Backtraces for failed tests
+        if: failure()
+        working-directory: build
+        run: |
+          for t in $(sed -n 's/^\([0-9]*\):\(.*\)$/\2/p' Testing/Temporary/LastTestsFailed.log 2>/dev/null); do
+            exe=$(ctest -V -R "^$t$" -N 2>/dev/null | sed -n 's/^[0-9]*: Test command: *//p' | head -1 | tr -d '"')
+            [ -n "$exe" ] || continue
+            echo "=== $t, again without a debugger, frames symbolised ==="
+            ctest -R "^$t$" --output-on-failure > rerun.log 2>&1 || true
+            grep -a "CRASH" rerun.log || echo "(no crash this time)"
+            grep -a "^FRAME \|\] FRAME " rerun.log | sed 's/^.*FRAME //' | while read -r mod rva; do
+              m=$(cygpath -u "$mod" 2>/dev/null || echo "$mod")
+              base=$(objdump -p "$m" 2>/dev/null | sed -n 's/^ImageBase[[:space:]]*//p')
+              if [ -n "$base" ]; then
+                addr=$(printf '0x%x' $(( 0x$base + rva )))
+                echo "  $(basename "$m")+$rva: $(addr2line -f -C -p -e "$m" "$addr" 2>/dev/null)"
+              else
+                echo "  $(basename "$m")+$rva"
+              fi
+            done
+            echo "=== $t ($exe) under gdb ==="
+            # _NO_DEBUG_HEAP: a process started under a debugger otherwise
+            # gets Windows' debug heap, which hides heap misuse
+            _NO_DEBUG_HEAP=1 timeout 300 gdb -q -batch -ex "set pagination off" -ex run \
+              -ex "thread apply all bt 30" -ex "info registers" --args "$exe" 2>&1 | tail -200 || true
+          done
