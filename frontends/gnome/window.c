@@ -586,7 +586,6 @@ static void ask_rom_slot(A800Window *self, const char *path, const int *slots, i
                "%s is not one of the ROMs this app knows by its checksum, but it is the "
                "size of these. Which is it?", base_name(path));
     dlg = adw_alert_dialog_new("Which ROM Is It?", body);
-    adw_alert_dialog_set_prefer_wide_layout(ADW_ALERT_DIALOG(dlg), FALSE);
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dlg), "cancel", "Cancel");
     for (int i = 0; i < n && i < 8; i++) {
         char id[16];
