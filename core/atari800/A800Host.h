@@ -45,7 +45,8 @@ public:
 		std::function<void()> afterFrame;
 		// emulation thread: the frame-render options
 		std::function<void(int& area, bool& show80)> videoOptions;
-		// emulation thread: the machine stopped in the debugger
+		// emulation thread: the machine broke into the debugger; Resume() here
+		// lets it go on without ever showing as stopped
 		std::function<void()> onStopped;
 		// emulation thread: atari800's log text
 		std::function<void(const char* text)> onLog;
@@ -61,6 +62,7 @@ public:
 	bool Start(std::string& error);
 	void Stop();
 	bool IsRunning() const { return _running.load(); }
+	bool Quitting() const { return _quit.load(); }
 	static bool OnEmulationThread();
 
 	// ---- jobs
@@ -92,8 +94,16 @@ public:
 
 	// ---- the debugger's stop (from PLATFORM_Exit(TRUE))
 	bool Stopped() const { return _stopped.load(); }
-	void Resume();                     // let a parked machine go
+	// Lets a parked machine go; returns once it has left the park (or
+	// parked again). A Frame job releases a parked machine too, and breaks
+	// are then ignored until the frame ends.
+	void Resume();
 	void SuppressBreaks(bool s) { _suppressBreaks.store(s); }
+	// Moves on every park and every release.
+	unsigned ParkSerial() const { return _parkSerial.load(); }
+	// Emulation thread, inside a job that waits while parked: run the
+	// other Any jobs meanwhile.
+	void RunParkedJobs() { RunJobs(true); }
 
 	// core-side callbacks (a8host.h)
 	void OnSound(const void* pcm, unsigned bytes);
@@ -118,6 +128,8 @@ private:
 	std::atomic<bool> _stopped { false };
 	std::atomic<bool> _resume { false };
 	std::atomic<bool> _suppressBreaks { false };
+	std::atomic<bool> _breakHold { false };     // until the frame ends
+	std::atomic<unsigned> _parkSerial { 0 };
 
 	std::mutex _startLock;
 	std::condition_variable _startCv;

@@ -200,6 +200,7 @@ void A800Host::ThreadBody()
 		if (_cb.beforeFrame)
 			_cb.beforeFrame();
 		Atari800_Frame();
+		_breakHold.store(false);
 		DrainLog();
 		if (Atari800_display_screen)
 			PublishFrame();
@@ -329,21 +330,34 @@ void A800Host::SetPowered(bool on)
 // Called inside Atari800_Frame (CPU_GO), registers synced to CPU_reg*.
 void A800Host::OnBreak()
 {
-	if (_suppressBreaks.load() || _quit.load())
+	if (_suppressBreaks.load() || _breakHold.load() || _quit.load())
 		return;
 	_resume.store(false);
-	_stopped.store(true);
 	if (_cb.onStopped)
 		_cb.onStopped();
+	if (_resume.load())
+		return;   // it let the machine go on (stepping off a breakpoint ...)
+	_parkSerial.fetch_add(1);
+	_stopped.store(true);
 	FlushAudio();
 	while (!_resume.load() && !_quit.load()) {
 		RunJobs(true);
 		std::unique_lock<std::mutex> lock(_jobLock);
+		if (!_frameJobs.empty()) {
+			// power, media: they run at the frame's end
+			_breakHold.store(true);
+			break;
+		}
 		_jobCv.wait_for(lock, std::chrono::milliseconds(100), [this] {
-			return !_anyJobs.empty() || _resume.load() || _quit.load();
+			return !_anyJobs.empty() || !_frameJobs.empty() || _resume.load() || _quit.load();
 		});
 	}
-	_stopped.store(false);
+	{
+		std::lock_guard<std::mutex> lock(_jobLock);
+		_stopped.store(false);
+		_parkSerial.fetch_add(1);
+	}
+	_jobCv.notify_all();
 	_nextFrameNs = MonoNs();
 }
 
@@ -355,8 +369,16 @@ void A800Host::OnConfig()
 
 void A800Host::Resume()
 {
+	const unsigned serial = _parkSerial.load();
+	const bool wasStopped = _stopped.load();
 	_resume.store(true);
 	_jobCv.notify_all();
+	if (!wasStopped || tOnEmulationThread)
+		return;
+	std::unique_lock<std::mutex> lock(_jobLock);
+	_jobCv.wait_for(lock, std::chrono::seconds(2), [&] {
+		return _parkSerial.load() != serial || !_running.load() || _quit.load();
+	});
 }
 
 // ---- video and pacing ------------------------------------------------------

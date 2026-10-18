@@ -34,6 +34,7 @@ extern "C" {
 #include "colours_external.h"
 #include "colours_ntsc.h"
 #include "colours_pal.h"
+#include "cpu.h"
 #include "devices.h"
 #include "esc.h"
 #include "filter_ntsc.h"
@@ -305,6 +306,7 @@ void SessionImpl::ColdStart()
 	}
 	BINLOAD_start_binloading = FALSE;
 	BINLOAD_loading_basic = 0;
+	CPU_cim_encountered = FALSE;   // a crash left behind with no debugger
 	suppressReset = true;
 	Atari800_Coldstart();
 	suppressReset = false;
@@ -385,6 +387,7 @@ void SessionImpl::AfterFrame()
 	PasteStep();
 	if (SIO_last_op_time > 0)
 		SIO_last_op_time--;
+	session_debug_after_frame();
 }
 
 void SessionImpl::OnLog(const char* text)

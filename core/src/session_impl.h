@@ -114,6 +114,7 @@ int  session_binding_target_for_key(struct a800session* s, uint32_t keysym);
 void session_debug_stopped(struct a800session* s);
 void session_debug_pause(struct a800session* s);
 void session_debug_free(struct a800session* s);
+void session_debug_after_frame(void);
 }
 
 #endif

@@ -1,0 +1,73 @@
+From 279f79b9adef458c918e9ea014591efd2d5b9e45 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sun, 18 Oct 2026 00:16:18 -0500
+Subject: [PATCH] SIO_trace_hook: report each SIO command frame
+
+---
+ src/sio.c | 14 ++++++++++++++
+ src/sio.h |  6 ++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/src/sio.c b/src/sio.c
+index 9a5b710..11f6fc1 100644
+--- a/src/sio.c
++++ b/src/sio.c
+@@ -1111,6 +1111,8 @@ static int last_ypos = 0;
+ #endif
+ 
+ /* SIO patch emulation routine */
++void (*SIO_trace_hook)(const UBYTE *frame, int path) = NULL;
++
+ void SIO_Handler(void)
+ {
+ 	int sector = MEMORY_dGetWordAligned(0x30a);
+@@ -1138,6 +1140,14 @@ void SIO_Handler(void)
+ 	MEMORY_dPutByte(0x023a, unit); /* sta CDEVIC */
+ 	MEMORY_dPutByte(0x023b, cmd); /* sta CCOMND */
+ 	MEMORY_dPutWordAligned(0x023c, sector); /* sta CAUX1; sta CAUX2 */
++	if (SIO_trace_hook != NULL) {
++		UBYTE frame[4];
++		frame[0] = unit;
++		frame[1] = (UBYTE) cmd;
++		frame[2] = (UBYTE) sector;
++		frame[3] = (UBYTE) (sector >> 8);
++		SIO_trace_hook(frame, SIO_TRACE_PATCH);
++	}
+ 
+ 	/* Disk 1 is ASCII '1' = 0x31 etc */
+ 	/* Disk 1 -> unit = 0 */
+@@ -1608,6 +1618,8 @@ void NetSIO_PutByte(int byte)
+ 			CommandFrame[CommandIndex++] = byte; /* Collect CF bytes into buffer */
+ 			if (CommandIndex == ExpectedBytes)
+ 			{
++				if (SIO_trace_hook != NULL)
++					SIO_trace_hook(CommandFrame, SIO_TRACE_NETSIO);
+ 				netsio_netstream_note_command_frame(CommandFrame, ExpectedBytes);
+ 				netsio_send_block(CommandFrame, ExpectedBytes); /* Send CF buffer */
+ 			}
+@@ -1674,6 +1686,8 @@ void SIO_PutByte(int byte)
+ 		if (CommandIndex < ExpectedBytes) {
+ 			CommandFrame[CommandIndex++] = byte;
+ 			if (CommandIndex >= ExpectedBytes) {
++				if (SIO_trace_hook != NULL)
++					SIO_trace_hook(CommandFrame, SIO_TRACE_SERIAL);
+ 				if (CommandFrame[0] >= 0x31 && CommandFrame[0] <= 0x38 && (SIO_drive_status[CommandFrame[0]-0x31] != SIO_OFF || BINLOAD_start_binloading)) {
+ 					TransferStatus = SIO_StatusRead;
+ 					POKEY_DELAYED_SERIN_IRQ = SIO_SERIN_INTERVAL + SIO_ACK_INTERVAL;
+diff --git a/src/sio.h b/src/sio.h
+index 3be1669..be1a5c8 100644
+--- a/src/sio.h
++++ b/src/sio.h
+@@ -33,6 +33,12 @@ void SIO_DisableDrive(int diskno);
+ int SIO_RotateDisks(void);
+ void SIO_Handler(void);
+ 
++/* Called with each SIO command frame (device, command, aux1, aux2), from
++   the patched SIOV (SIO_TRACE_PATCH), the emulated serial bus
++   (SIO_TRACE_SERIAL) or NetSIO (SIO_TRACE_NETSIO). */
++enum { SIO_TRACE_PATCH, SIO_TRACE_SERIAL, SIO_TRACE_NETSIO };
++extern void (*SIO_trace_hook)(const UBYTE *frame, int path);
++
+ UBYTE SIO_ChkSum(const UBYTE *buffer, int length);
+ void SIO_SwitchCommandFrame(int onoff);
+ #ifdef NETSIO

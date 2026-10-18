@@ -1,0 +1,762 @@
+From 05e4a536df3ccdf123cb55582d0c6faf033e612a Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Sun, 18 Oct 2026 00:15:57 -0500
+Subject: [PATCH] Monitor: MONITOR_EMBEDDED, a host-driven monitor
+ (Enter/Execute, input hook, buffer disassembly)
+
+---
+ src/monitor.c | 586 ++++++++++++++++++++++++++++----------------------
+ src/monitor.h |  15 ++
+ 2 files changed, 343 insertions(+), 258 deletions(-)
+
+diff --git a/src/monitor.c b/src/monitor.c
+index 082fbd2..57719ad 100644
+--- a/src/monitor.c
++++ b/src/monitor.c
+@@ -60,10 +60,13 @@
+ #include <readline/history.h>
+ #endif
+ 
+-#ifdef __PLUS
++#if defined(__PLUS) || defined(MONITOR_EMBEDDED)
+ 
++#include <errno.h>
+ #include <stdarg.h>
++#ifdef __PLUS
+ #include "misc_win.h"
++#endif
+ 
+ FILE *mon_output, *mon_input;
+ 
+@@ -86,13 +89,13 @@ void monitor_printf(const char *format, ...)
+ #undef stdin
+ #define stdin mon_input
+ 
+-#define PLUS_EXIT_MONITOR Misc_FreeMonitorConsole(mon_output, mon_input)
+-
+-#else /* __PLUS */
++#endif /* __PLUS || MONITOR_EMBEDDED */
+ 
++#ifdef __PLUS
++#define PLUS_EXIT_MONITOR Misc_FreeMonitorConsole(mon_output, mon_input)
++#else
+ #define PLUS_EXIT_MONITOR
+-
+-#endif /* __PLUS */
++#endif
+ 
+ UBYTE *trainer_memory = NULL;
+ UBYTE *trainer_flags = NULL;
+@@ -517,6 +520,18 @@ static int find_label_value(const char *name)
+ 	return -1;
+ }
+ 
++#ifdef MONITOR_EMBEDDED
++const char *MONITOR_LabelFor(UWORD addr, int is_write)
++{
++	return find_label_name(addr, is_write);
++}
++
++int MONITOR_LabelValue(const char *name)
++{
++	return find_label_value(name);
++}
++#endif
++
+ static void free_user_labels(void)
+ {
+ 	if (symtable_user != NULL) {
+@@ -701,11 +716,23 @@ const UBYTE MONITOR_optype6502[256] = {
+ };
+ 
+ 
++#ifdef MONITOR_EMBEDDED
++int (*MONITOR_gets_hook)(char *buffer, size_t size, char const *prompt) = NULL;
++#endif
++
+ static void safe_gets(char *buffer, size_t size, char const *prompt)
+ {
+ #ifdef HAVE_FFLUSH
+ 	fflush(stdout);
+ #endif
++#ifdef MONITOR_EMBEDDED
++	if (MONITOR_gets_hook != NULL) {
++		if (!MONITOR_gets_hook(buffer, size, prompt))
++			buffer[0] = '\0';
++		Util_chomp(buffer);
++		return;
++	}
++#endif
+ 
+ #ifdef MONITOR_READLINE
+ 	{
+@@ -728,9 +755,13 @@ static void safe_gets(char *buffer, size_t size, char const *prompt)
+ 
+ static int pager(void)
+ {
++#ifdef MONITOR_EMBEDDED
++	return 0; /* the host's console scrolls */
++#else
+ 	char buf[100];
+ 	safe_gets(buf, sizeof(buf), "Press Return to continue ('q' to quit): ");
+ 	return buf[0] == 'q' || buf[0] == 'Q';
++#endif
+ }
+ 
+ static char *token_ptr;
+@@ -895,7 +926,7 @@ static int get_attrib_range(UWORD *addr1, UWORD *addr2)
+ 	return FALSE;
+ }
+ 
+-static UWORD show_instruction(FILE *fp, UWORD pc)
++UWORD MONITOR_DisassembleLine(UWORD pc, char *buf, size_t size)
+ {
+ 	UWORD addr = pc;
+ 	UBYTE insn;
+@@ -911,13 +942,13 @@ static UWORD show_instruction(FILE *fp, UWORD pc)
+ 		if (*p == '1') {
+ 			value = MEMORY_SafeGetByte(pc);
+ 			pc++;
+-			nchars = fprintf(fp, "%04X: %02X %02X     " /*"%Xcyc  "*/ "%.*s$%02X%s",
++			nchars = snprintf(buf, size, "%04X: %02X %02X     " /*"%Xcyc  "*/ "%.*s$%02X%s",
+ 			                 addr, insn, value, /*cycles[insn],*/ (int) (p - mnemonic), mnemonic, value, p + 1);
+ 			break;
+ 		}
+ 		if (*p == '2') {
+ 			value = MEMORY_SafeGetByte(pc) + (MEMORY_SafeGetByte(pc + 1) << 8);
+-			nchars = fprintf(fp, "%04X: %02X %02X %02X  " /*"%Xcyc  "*/ "%.*s$%04X%s",
++			nchars = snprintf(buf, size, "%04X: %02X %02X %02X  " /*"%Xcyc  "*/ "%.*s$%04X%s",
+ 			                 addr, insn, value & 0xff, value >> 8, /*cycles[insn],*/ (int) (p - mnemonic), mnemonic, value, p + 1);
+ 			pc += 2;
+ 			break;
+@@ -926,12 +957,12 @@ static UWORD show_instruction(FILE *fp, UWORD pc)
+ 			UBYTE op = MEMORY_SafeGetByte(pc);
+ 			pc++;
+ 			value = (UWORD) (pc + (SBYTE) op);
+-			nchars = fprintf(fp, "%04X: %02X %02X     " /*"3cyc  "*/ "%.4s$%04X", addr, insn, op, mnemonic, value);
++			nchars = snprintf(buf, size, "%04X: %02X %02X     " /*"3cyc  "*/ "%.4s$%04X", addr, insn, op, mnemonic, value);
+ 			break;
+ 		}
+ 	}
+ 	if (*p == '\0') {
+-		fprintf(fp, "%04X: %02X        " /*"%Xcyc  "*/ "%s\n", addr, insn, /*cycles[insn],*/ mnemonic);
++		snprintf(buf, size, "%04X: %02X        " /*"%Xcyc  "*/ "%s\n", addr, insn, /*cycles[insn],*/ mnemonic);
+ 		return pc;
+ 	}
+ #ifdef MONITOR_HINTS
+@@ -939,14 +970,30 @@ static UWORD show_instruction(FILE *fp, UWORD pc)
+ 		/* different names when reading/writing memory */
+ 		const char *label = find_label_name((UWORD) value, (MONITOR_optype6502[insn] & 0x08) != 0);
+ 		if (label != NULL) {
+-			fprintf(fp, "%*s;%s\n", 28 - nchars, "", label);
++			size_t len = strlen(buf);
++			if (len < size)
++				snprintf(buf + len, size - len, "%*s;%s\n", 28 - nchars, "", label);
+ 			return pc;
+ 		}
+ 	}
+ #else
+ 	(void)nchars;
+ #endif
+-	fputc('\n', fp);
++	{
++		size_t len = strlen(buf);
++		if (len + 1 < size) {
++			buf[len] = '\n';
++			buf[len + 1] = '\0';
++		}
++	}
++	return pc;
++}
++
++static UWORD show_instruction(FILE *fp, UWORD pc)
++{
++	char buf[128];
++	pc = MONITOR_DisassembleLine(pc, buf, sizeof(buf));
++	fputs(buf, fp);
+ 	return pc;
+ }
+ 
+@@ -3773,20 +3820,12 @@ void MONITOR_BPC(char *arg)
+ }
+ #endif
+ 
+-int MONITOR_Run(void)
+-{
+-	UWORD addr;
+-
+-#ifdef __PLUS
+-	if (!Misc_AllocMonitorConsole(&mon_output, &mon_input))
+-		return TRUE;
+-#endif
+-
+-#ifdef MONITOR_READLINE
+-	init_readline();
+-#endif
++static UWORD monitor_addr;
+ 
+-	addr = CPU_regPC;
++/* Reports why the monitor was entered and shows the CPU state. */
++void MONITOR_Enter(void)
++{
++	monitor_addr = CPU_regPC;
+ 
+ 	CPU_GetStatus();
+ 
+@@ -3812,267 +3851,298 @@ int MONITOR_Run(void)
+ #endif /* MONITOR_BREAK */
+ 
+ 	show_state();
++}
+ 
+-	for (;;) {
+-		char s[128];
+-		static char old_s[128];
+-		char *t;
++/* Runs one command line (modified in place). Returns -1 to stay in the
++   monitor, TRUE to continue emulation, FALSE to quit. */
++int MONITOR_Execute(char *s)
++{
++	char *t;
+ 
+-		safe_gets(s, sizeof(s), "> ");
+-		if (s[0] != '\0')
+-			strcpy(old_s, s);
+-		else {
+-			/* if no command is given, restart the last one, but remove all
+-			 * arguments, so after a 'm 600' we will see 'm 700' ... */
+-			int i;
+-			strcpy(s, old_s);
+-			for (i = 0; i < (int) sizeof(s); i++)
+-				if (s[i] == ' ') {
+-					s[i] = '\0';
+-					break;
+-				}
+-		}
+ #ifdef HAVE_SYSTEM
+-		if (s[0] == '!') {
+-			if (system(s + 1) == -1) {
+-				printf("Error executing '%s'\n", s+1);
+-			}
+-			continue;
++	if (s[0] == '!') {
++		if (system(s + 1) == -1) {
++			printf("Error executing '%s'\n", s+1);
+ 		}
++		return -1;
++	}
+ #endif
+-		token_ptr = s;
+-		t = get_token();
+-		if (t == NULL)
+-			continue;
++	token_ptr = s;
++	t = get_token();
++	if (t == NULL)
++		return -1;
+ 
+-		/* uppercase the command */
+-		Util_strupper(t);
++	/* uppercase the command */
++	Util_strupper(t);
+ 
+-		if (strcmp(t, "CONT") == 0) {
+-			if(get_hex(&addr)) CPU_regPC = addr;
++	if (strcmp(t, "CONT") == 0) {
++		if(get_hex(&monitor_addr)) CPU_regPC = monitor_addr;
+ #ifdef MONITOR_PROFILE
+-			memset(CPU_instruction_count, 0, sizeof(CPU_instruction_count));
++		memset(CPU_instruction_count, 0, sizeof(CPU_instruction_count));
+ #endif /* MONITOR_PROFILE */
+-			PLUS_EXIT_MONITOR;
+-			return TRUE;
+-		}
++		PLUS_EXIT_MONITOR;
++		return TRUE;
++	}
+ #ifdef MONITOR_BREAK
+-		else if (strcmp(t, "BBRK") == 0)
+-			monitor_break_BRK();
+-		else if (strcmp(t, "BPC") == 0)
+-			monitor_break_PC();
+-		else if (strcmp(t, "HISTORY") == 0 || strcmp(t, "H") == 0)
+-			show_history();
+-		else if (strcmp(t, "JUMPS") == 0)
+-			show_last_jumps();
+-		else if (strcmp(t, "G") == 0) {
+-			if(get_hex(&addr)) CPU_regPC = addr;
+-			MONITOR_break_step = TRUE;
+-			PLUS_EXIT_MONITOR;
+-			return TRUE;
+-		}
+-		else if (strcmp(t, "R") == 0 ) {
+-			if(get_hex(&addr)) CPU_regPC = addr;
+-			MONITOR_break_ret = TRUE;
+-			MONITOR_ret_nesting = 1;
+-			PLUS_EXIT_MONITOR;
+-			return TRUE;
+-		}
+-		else if (strcmp(t, "O") == 0) {
+-			if(get_hex(&addr)) CPU_regPC = addr;
+-			get_hex(&addr);
+-			step_over();
+-			PLUS_EXIT_MONITOR;
+-			return TRUE;
+-		}
++	else if (strcmp(t, "BBRK") == 0)
++		monitor_break_BRK();
++	else if (strcmp(t, "BPC") == 0)
++		monitor_break_PC();
++	else if (strcmp(t, "HISTORY") == 0 || strcmp(t, "H") == 0)
++		show_history();
++	else if (strcmp(t, "JUMPS") == 0)
++		show_last_jumps();
++	else if (strcmp(t, "G") == 0) {
++		if(get_hex(&monitor_addr)) CPU_regPC = monitor_addr;
++		MONITOR_break_step = TRUE;
++		PLUS_EXIT_MONITOR;
++		return TRUE;
++	}
++	else if (strcmp(t, "R") == 0 ) {
++		if(get_hex(&monitor_addr)) CPU_regPC = monitor_addr;
++		MONITOR_break_ret = TRUE;
++		MONITOR_ret_nesting = 1;
++		PLUS_EXIT_MONITOR;
++		return TRUE;
++	}
++	else if (strcmp(t, "O") == 0) {
++		if(get_hex(&monitor_addr)) CPU_regPC = monitor_addr;
++		get_hex(&monitor_addr);
++		step_over();
++		PLUS_EXIT_MONITOR;
++		return TRUE;
++	}
+ #endif /* MONITOR_BREAK */
+ #if defined(MONITOR_BREAK) || !defined(NO_YPOS_BREAK_FLICKER)
+-		else if (strcmp(t, "BLINE") == 0)
+-			monitor_bline();
++	else if (strcmp(t, "BLINE") == 0)
++		monitor_bline();
+ #endif /* defined(MONITOR_BREAK) || !defined(NO_YPOS_BREAK_FLICKER) */
+-		else if (strcmp(t, "DLIST") == 0)
+-			show_dlist();
+-		else if (strcmp(t, "SETPC") == 0)
+-			get_uword(&CPU_regPC);
+-		else if (strcmp(t, "SETS") == 0)
+-			get_ubyte(&CPU_regS);
+-		else if (strcmp(t, "SETA") == 0)
+-			get_ubyte(&CPU_regA);
+-		else if (strcmp(t, "SETX") == 0)
+-			get_ubyte(&CPU_regX);
+-		else if (strcmp(t, "SETY") == 0)
+-			get_ubyte(&CPU_regY);
+-		else if (strcmp(t, "SETN") == 0)
+-			monitor_set_N(get_bool());
+-		else if (strcmp(t, "SETV") == 0)
+-			monitor_set_V(get_bool());
+-		else if (strcmp(t, "SETD") == 0)
+-			monitor_set_D(get_bool());
+-		else if (strcmp(t, "SETI") == 0)
+-			monitor_set_I(get_bool());
+-		else if (strcmp(t, "SETZ") == 0)
+-			monitor_set_Z(get_bool());
+-		else if (strcmp(t, "SETC") == 0)
+-			monitor_set_C(get_bool());
++	else if (strcmp(t, "DLIST") == 0)
++		show_dlist();
++	else if (strcmp(t, "SETPC") == 0)
++		get_uword(&CPU_regPC);
++	else if (strcmp(t, "SETS") == 0)
++		get_ubyte(&CPU_regS);
++	else if (strcmp(t, "SETA") == 0)
++		get_ubyte(&CPU_regA);
++	else if (strcmp(t, "SETX") == 0)
++		get_ubyte(&CPU_regX);
++	else if (strcmp(t, "SETY") == 0)
++		get_ubyte(&CPU_regY);
++	else if (strcmp(t, "SETN") == 0)
++		monitor_set_N(get_bool());
++	else if (strcmp(t, "SETV") == 0)
++		monitor_set_V(get_bool());
++	else if (strcmp(t, "SETD") == 0)
++		monitor_set_D(get_bool());
++	else if (strcmp(t, "SETI") == 0)
++		monitor_set_I(get_bool());
++	else if (strcmp(t, "SETZ") == 0)
++		monitor_set_Z(get_bool());
++	else if (strcmp(t, "SETC") == 0)
++		monitor_set_C(get_bool());
+ #ifdef MONITOR_TRACE
+-		else if (strcmp(t, "TRACE") == 0) {
+-			const char *filename = get_token();
+-			set_trace_file(filename);
+-		}
++	else if (strcmp(t, "TRACE") == 0) {
++		const char *filename = get_token();
++		set_trace_file(filename);
++	}
+ #endif /* MONITOR_TRACE */
+ #ifdef MONITOR_PROFILE
+-		else if (strcmp(t, "PROFILE") == 0)
+-			command_PROFILE();
+-		else if (strcmp(t, "COV") == 0)
+-			coverage();
++	else if (strcmp(t, "PROFILE") == 0)
++		command_PROFILE();
++	else if (strcmp(t, "COV") == 0)
++		coverage();
+ #endif /* MONITOR_PROFILE */
+-		else if (strcmp(t, "SHOW") == 0)
+-			show_state();
+-		else if (strcmp(t, "STACK") == 0)
+-			show_stack();
+-		else if (strcmp(t, "ROM") == 0)
+-			monitor_set_ROM();
+-		else if (strcmp(t, "RAM") == 0)
+-			monitor_set_RAM();
++	else if (strcmp(t, "SHOW") == 0)
++		show_state();
++	else if (strcmp(t, "STACK") == 0)
++		show_stack();
++	else if (strcmp(t, "ROM") == 0)
++		monitor_set_ROM();
++	else if (strcmp(t, "RAM") == 0)
++		monitor_set_RAM();
+ #ifndef PAGED_ATTRIB
+-		else if (strcmp(t, "HARDWARE") == 0)
+-			monitor_set_hardware();
++	else if (strcmp(t, "HARDWARE") == 0)
++		monitor_set_hardware();
+ #endif /* PAGED_ATTRIB */
+-		else if (strcmp(t, "CART") == 0)
+-			show_CARTRIDGE();
+-		else if (strcmp(t, "COLDSTART") == 0) {
+-			Atari800_Coldstart();
+-			PLUS_EXIT_MONITOR;
+-			return TRUE;	/* perform reboot immediately */
+-		}
+-		else if (strcmp(t, "WARMSTART") == 0) {
+-			Atari800_Warmstart();
+-			PLUS_EXIT_MONITOR;
+-			return TRUE;	/* perform reboot immediately */
+-		}
++	else if (strcmp(t, "CART") == 0)
++		show_CARTRIDGE();
++	else if (strcmp(t, "COLDSTART") == 0) {
++		Atari800_Coldstart();
++		PLUS_EXIT_MONITOR;
++		return TRUE;	/* perform reboot immediately */
++	}
++	else if (strcmp(t, "WARMSTART") == 0) {
++		Atari800_Warmstart();
++		PLUS_EXIT_MONITOR;
++		return TRUE;	/* perform reboot immediately */
++	}
+ #ifndef PAGED_MEM
+-		else if (strcmp(t, "READ") == 0)
+-			monitor_read_from_file(&addr);
+-		else if (strcmp(t, "WRITE") == 0)
+-			monitor_write_to_file();
+-		else if (strcmp(t, "F") == 0)
+-			monitor_fill_mem();
+-		else if (strcmp(t, "C") == 0)
+-			monitor_change_mem(&addr);
++	else if (strcmp(t, "READ") == 0)
++		monitor_read_from_file(&monitor_addr);
++	else if (strcmp(t, "WRITE") == 0)
++		monitor_write_to_file();
++	else if (strcmp(t, "F") == 0)
++		monitor_fill_mem();
++	else if (strcmp(t, "C") == 0)
++		monitor_change_mem(&monitor_addr);
+ #endif /* PAGED_MEM */
+-		else if (strcmp(t, "SUM") == 0)
+-			monitor_sum_mem();
+-		else if (strcmp(t, "M") == 0)
+-			monitor_show_mem(&addr, FALSE);
+-		else if (strcmp(t, "MS") == 0)
+-			monitor_show_mem(&addr, TRUE);
+-		else if (strcmp(t, "TSS") == 0)
+-			trainer_start_search();
+-		else if (strcmp(t, "TSN") == 0)
+-			trainer_search_unchanged();
+-		else if (strcmp(t, "TSC") == 0)
+-			trainer_search_changed();
+-		else if (strcmp(t, "TSP") == 0)
+-			trainer_print_addresses();
+-		else if (strcmp(t, "S") == 0)
+-			monitor_search_mem();
++	else if (strcmp(t, "SUM") == 0)
++		monitor_sum_mem();
++	else if (strcmp(t, "M") == 0)
++		monitor_show_mem(&monitor_addr, FALSE);
++	else if (strcmp(t, "MS") == 0)
++		monitor_show_mem(&monitor_addr, TRUE);
++	else if (strcmp(t, "TSS") == 0)
++		trainer_start_search();
++	else if (strcmp(t, "TSN") == 0)
++		trainer_search_unchanged();
++	else if (strcmp(t, "TSC") == 0)
++		trainer_search_changed();
++	else if (strcmp(t, "TSP") == 0)
++		trainer_print_addresses();
++	else if (strcmp(t, "S") == 0)
++		monitor_search_mem();
+ #ifdef MONITOR_BREAKPOINTS
+-		else if (strcmp(t, "B") == 0)
+-			monitor_breakpoints();
++	else if (strcmp(t, "B") == 0)
++		monitor_breakpoints();
+ #endif
+-		else if (strcmp(t, "D") == 0) {
+-			get_hex(&addr);
+-			addr = disassemble(addr);
+-		}
+-		else if (strcmp(t, "LOOP") == 0) {
+-			get_hex(&addr);
+-			addr = disassemble_loop(addr);
+-		}
++	else if (strcmp(t, "D") == 0) {
++		get_hex(&monitor_addr);
++		monitor_addr = disassemble(monitor_addr);
++	}
++	else if (strcmp(t, "LOOP") == 0) {
++		get_hex(&monitor_addr);
++		monitor_addr = disassemble_loop(monitor_addr);
++	}
+ #ifdef MONITOR_HINTS
+-		else if (strcmp(t, "LABELS") == 0)
+-			configure_labels(&addr);
++	else if (strcmp(t, "LABELS") == 0)
++		configure_labels(&monitor_addr);
+ #endif
+-		else if (strcmp(t, "ANTIC") == 0)
+-			show_ANTIC();
+-		else if (strcmp(t, "PIA") == 0)
+-			show_PIA();
+-		else if (strcmp(t, "GTIA") == 0)
+-			show_GTIA();
+-		else if (strcmp(t, "POKEY") == 0)
+-			show_POKEY();
++	else if (strcmp(t, "ANTIC") == 0)
++		show_ANTIC();
++	else if (strcmp(t, "PIA") == 0)
++		show_PIA();
++	else if (strcmp(t, "GTIA") == 0)
++		show_GTIA();
++	else if (strcmp(t, "POKEY") == 0)
++		show_POKEY();
+ #ifdef MONITOR_ASSEMBLER
+-		else if (strcmp(t, "A") == 0) {
+-			get_hex(&addr);
+-			addr = assembler(addr);
+-		}
++	else if (strcmp(t, "A") == 0) {
++		get_hex(&monitor_addr);
++		monitor_addr = assembler(monitor_addr);
++	}
+ #endif
+-		else if (strcmp(t, "DEC") == 0) {
+-			if(get_hex(&addr))
+-				hex_to_dec(addr);
+-			else
+-				printf("Missing/invalid hex argument\n");
+-		} else if (strcmp(t, "HEX") == 0) {
+-			int d;
+-			if(get_dec(&d))
+-				dec_to_hex(d);
+-			else
+-				printf("Missing/invalid decimal argument\n");
+-		} else if (strcmp(t, "BIN") == 0) {
+-			if(get_hex(&addr))
+-				hex_to_bin(addr);
+-			else
+-				printf("Missing/invalid hex argument\n");
+-		} else if (strcmp(t, "BHEX") == 0) {
+-			bin_to_hex();
+-		} else if (strcmp(t, "AHEX") == 0) {
+-			asc_to_hex(FALSE);
+-		} else if (strcmp(t, "ASC") == 0) {
+-			hex_to_asc(FALSE);
+-		} else if (strcmp(t, "SHEX") == 0) {
+-			asc_to_hex(TRUE);
+-		} else if (strcmp(t, "SCR") == 0) {
+-			hex_to_asc(TRUE);
+-		} else if (strcmp(t, "GRC") == 0) {
+-			print_graphics(TRUE);
+-		} else if (strcmp(t, "GRM") == 0) {
+-			print_graphics(FALSE);
++	else if (strcmp(t, "DEC") == 0) {
++		if(get_hex(&monitor_addr))
++			hex_to_dec(monitor_addr);
++		else
++			printf("Missing/invalid hex argument\n");
++	} else if (strcmp(t, "HEX") == 0) {
++		int d;
++		if(get_dec(&d))
++			dec_to_hex(d);
++		else
++			printf("Missing/invalid decimal argument\n");
++	} else if (strcmp(t, "BIN") == 0) {
++		if(get_hex(&monitor_addr))
++			hex_to_bin(monitor_addr);
++		else
++			printf("Missing/invalid hex argument\n");
++	} else if (strcmp(t, "BHEX") == 0) {
++		bin_to_hex();
++	} else if (strcmp(t, "AHEX") == 0) {
++		asc_to_hex(FALSE);
++	} else if (strcmp(t, "ASC") == 0) {
++		hex_to_asc(FALSE);
++	} else if (strcmp(t, "SHEX") == 0) {
++		asc_to_hex(TRUE);
++	} else if (strcmp(t, "SCR") == 0) {
++		hex_to_asc(TRUE);
++	} else if (strcmp(t, "GRC") == 0) {
++		print_graphics(TRUE);
++	} else if (strcmp(t, "GRM") == 0) {
++		print_graphics(FALSE);
+ #ifndef BASIC
+-		} else if (strcmp(t, "SAVESTATE") == 0) {
+-			save_load_state(TRUE);
+-		} else if (strcmp(t, "LOADSTATE") == 0) {
+-			save_load_state(FALSE);
++	} else if (strcmp(t, "SAVESTATE") == 0) {
++		save_load_state(TRUE);
++	} else if (strcmp(t, "LOADSTATE") == 0) {
++		save_load_state(FALSE);
+ #endif /* BASIC */
+-		} else if (strcmp(t, "SSTR") == 0) {
+-			string_search(FALSE);
+-		} else if (strcmp(t, "SSCR") == 0) {
+-			string_search(TRUE);
+-		} else if (strcmp(t, "MFP") == 0) {
+-			mem_to_fp();
+-		} else if (strcmp(t, "CFP") == 0) {
+-			fp_to_hex(TRUE);
+-		} else if (strcmp(t, "FP") == 0) {
+-			int spaces = 0;
+-			char *p = token_ptr;
+-			while(*p++) spaces += (*p == ' ');
+-			/* if we got at least 2 args, assume the input is hex bytes.
+-				for 1 arg, assume it's a floating point number. */
+-			if(spaces)
+-				hex_to_fp();
+-			else
+-				fp_to_hex(FALSE);
+-		} else if (strcmp(t, "HELP") == 0 || strcmp(t, "?") == 0)
+-			show_help();
+-		else if (strcmp(t, "QUIT") == 0 || strcmp(t, "EXIT") == 0) {
+-			PLUS_EXIT_MONITOR;
+-			return FALSE;
+-		} else if(t[0] == '*' || t[0] == '@') {
+-			UWORD val;
+-			if(parse_hex(t, &val))
+-				printf("%s = $%04x\n", t, val);
+-			else
+-				printf("Invalid dereference\n");
+-		} else
+-			printf("Invalid command!\n");
++	} else if (strcmp(t, "SSTR") == 0) {
++		string_search(FALSE);
++	} else if (strcmp(t, "SSCR") == 0) {
++		string_search(TRUE);
++	} else if (strcmp(t, "MFP") == 0) {
++		mem_to_fp();
++	} else if (strcmp(t, "CFP") == 0) {
++		fp_to_hex(TRUE);
++	} else if (strcmp(t, "FP") == 0) {
++		int spaces = 0;
++		char *p = token_ptr;
++		while(*p++) spaces += (*p == ' ');
++		/* if we got at least 2 args, assume the input is hex bytes.
++			for 1 arg, assume it's a floating point number. */
++		if(spaces)
++			hex_to_fp();
++		else
++			fp_to_hex(FALSE);
++	} else if (strcmp(t, "HELP") == 0 || strcmp(t, "?") == 0)
++		show_help();
++	else if (strcmp(t, "QUIT") == 0 || strcmp(t, "EXIT") == 0) {
++#ifdef MONITOR_EMBEDDED
++		printf("Close the debugger to leave the monitor\n");
++		return -1;
++#else
++		PLUS_EXIT_MONITOR;
++		return FALSE;
++#endif
++	} else if(t[0] == '*' || t[0] == '@') {
++		UWORD val;
++		if(parse_hex(t, &val))
++			printf("%s = $%04x\n", t, val);
++		else
++			printf("Invalid dereference\n");
++	} else
++		printf("Invalid command!\n");
++	return -1;
++}
++
++int MONITOR_Run(void)
++{
++#ifdef __PLUS
++	if (!Misc_AllocMonitorConsole(&mon_output, &mon_input))
++		return TRUE;
++#endif
++
++#ifdef MONITOR_READLINE
++	init_readline();
++#endif
++
++	MONITOR_Enter();
++
++	for (;;) {
++		char s[128];
++		static char old_s[128];
++		int r;
++
++		safe_gets(s, sizeof(s), "> ");
++		if (s[0] != '\0')
++			strcpy(old_s, s);
++		else {
++			/* if no command is given, restart the last one, but remove all
++			 * arguments, so after a 'm 600' we will see 'm 700' ... */
++			int i;
++			strcpy(s, old_s);
++			for (i = 0; i < (int) sizeof(s); i++)
++				if (s[i] == ' ') {
++					s[i] = '\0';
++					break;
++				}
++		}
++		r = MONITOR_Execute(s);
++		if (r >= 0)
++			return r;
+ 	}
+ }
+ 
+diff --git a/src/monitor.h b/src/monitor.h
+index 0c7ad59..89bf10a 100644
+--- a/src/monitor.h
++++ b/src/monitor.h
+@@ -8,6 +8,21 @@
+ 
+ int MONITOR_Run(void);
+ 
++#ifdef MONITOR_EMBEDDED
++/* For a host with its own console: MONITOR_Enter once per stop, then
++   MONITOR_Execute per command line (-1 stay, TRUE continue). Output goes to
++   mon_output; MONITOR_gets_hook supplies input commands ask for. */
++extern FILE *mon_output, *mon_input;
++extern int (*MONITOR_gets_hook)(char *buffer, size_t size, char const *prompt);
++void MONITOR_Enter(void);
++int MONITOR_Execute(char *line);
++/* One instruction at pc into buf ("ADDR: bytes  mnemonic ;label\n");
++   returns the next pc. */
++UWORD MONITOR_DisassembleLine(UWORD pc, char *buf, size_t size);
++const char *MONITOR_LabelFor(UWORD addr, int is_write);
++int MONITOR_LabelValue(const char *name);
++#endif
++
+ #ifdef MONITOR_HINTS
+ void MONITOR_PreloadLabelFile(char *filename);
+ #endif

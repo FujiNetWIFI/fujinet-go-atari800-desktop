@@ -6,7 +6,7 @@ FujiNet Go Atari 800 desktop -- milestones (plan: build-a-new-fujinet-calm-valle
 [x] M3  media + REST: open/drives/cartridge/tape/states, import to SD
         (unverified: a .cas mounted in FujiNet's slot 8 over atari800's hub)
 [x] M4  input: keymap, on-screen keyboard, paste, bindings, gamepads, paddles, mice
-[ ] M5  debugger engine
+[x] M5  debugger engine (debug_test: ASan + TSan clean)
 [ ] M6  GNOME
 [ ] M7  KDE
 [ ] M8  Windows
