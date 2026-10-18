@@ -755,7 +755,9 @@ int a800debug_command(a800debug* d, const char* line, char* dst, int dstsz)
 		d->cmdCv.notify_all();
 	}
 	else {
-		if (d->cmdRunning)
+		// one still running is left alone; one that finished with no caller
+		// waiting (the assembler given up on a detach) is over
+		if (d->cmdRunning && !d->cmdDone)
 			return A800DBG_CMD_OK;
 		d->cmdRunning = true;
 		d->cmdDone = false;

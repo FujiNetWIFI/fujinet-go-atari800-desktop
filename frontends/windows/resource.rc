@@ -1,0 +1,8 @@
+/* The icon and the manifest.
+ * Copyright (C) 2026 Thomas Cherryhomes
+ * SPDX-License-Identifier: GPL-3.0-or-later */
+#include "resource.h"
+
+IDI_APPICON ICON "app.ico"
+
+1 24 "app.manifest"

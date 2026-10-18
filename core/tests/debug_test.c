@@ -166,6 +166,17 @@ int main(void)
     a800debug_read(d, 0x0640, b, 2);
     CHECK(b[0] == 0xA9 && b[1] == 0x42, "assembled %02X %02X", b[0], b[1]);
 
+    /* the assembler given up by a detach: the console still works after */
+    rc = a800debug_command(d, "A 0660", out, sizeof out);
+    CHECK(rc == A800DBG_CMD_NEEDS_INPUT, "A again %d", rc);
+    a800debug_detach(d);
+    a800debug_attach(d);
+    CHECK(wait_stop(d, why, sizeof why), "attach after giving up");
+    rc = a800debug_command(d, "BLINE 120", out, sizeof out);
+    CHECK(rc == A800DBG_CMD_OK && strstr(out, "scanline 120"), "console after detach: %d [%s]", rc, out);
+    a800debug_command(d, "BLINE 999", out, sizeof out);
+    enter_prog(d, 0x0600);
+
     /* labels: the OS's, and a symbol file */
     CHECK(a800debug_label_address(d, "CIOV") == 0xE456, "CIOV");
     a800debug_address_label(d, 0xE456, why, sizeof why);

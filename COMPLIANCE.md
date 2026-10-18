@@ -11,6 +11,7 @@
 | SDL3 | libsdl-org | Zlib | audio and gamepads; system package on Linux, static in releases |
 | zlib | zlib.net | Zlib | gzipped disk images and save states |
 | mbedTLS 3.6.x | Mbed-TLS | Apache-2.0 | for `libfujinet` |
+| OpenSSL 3, expat | openssl.org, libexpat | Apache-2.0, MIT | for `libfujinet` (its bundled libssh and libsmb2, its HTTP parser); system libraries on Linux and macOS, linked into `fujinet.dll` on Windows |
 
 The combined work is distributed under GPL-3.0.
 
