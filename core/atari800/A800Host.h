@@ -129,6 +129,7 @@ private:
 	std::atomic<bool> _resume { false };
 	std::atomic<bool> _suppressBreaks { false };
 	std::atomic<bool> _breakHold { false };     // until the frame ends
+	bool _tableResting = false;                 // emulation thread
 	std::atomic<unsigned> _parkSerial { 0 };
 
 	std::mutex _startLock;

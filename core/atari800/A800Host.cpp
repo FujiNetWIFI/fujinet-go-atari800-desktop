@@ -23,6 +23,7 @@ extern "C" {
 #include "config.h"
 #include "atari.h"
 #include "log.h"
+#include "monitor.h"
 #include "screen.h"
 #include "sound.h"
 #include "a8host.h"
@@ -201,6 +202,10 @@ void A800Host::ThreadBody()
 			_cb.beforeFrame();
 		Atari800_Frame();
 		_breakHold.store(false);
+		if (_tableResting) {
+			MONITOR_breakpoints_enabled = TRUE;
+			_tableResting = false;
+		}
 		DrainLog();
 		if (Atari800_display_screen)
 			PublishFrame();
@@ -330,8 +335,14 @@ void A800Host::SetPowered(bool on)
 // Called inside Atari800_Frame (CPU_GO), registers synced to CPU_reg*.
 void A800Host::OnBreak()
 {
-	if (_suppressBreaks.load() || _breakHold.load() || _quit.load())
+	if (_suppressBreaks.load() || _breakHold.load() || _quit.load()) {
+		// a condition-table breakpoint backs up to its instruction and
+		// fires again at once: not parking would spin there for ever, so
+		// the table rests until the frame ends
+		MONITOR_breakpoints_enabled = FALSE;
+		_tableResting = true;
 		return;
+	}
 	_resume.store(false);
 	if (_cb.onStopped)
 		_cb.onStopped();
@@ -346,6 +357,8 @@ void A800Host::OnBreak()
 		if (!_frameJobs.empty()) {
 			// power, media: they run at the frame's end
 			_breakHold.store(true);
+			MONITOR_breakpoints_enabled = FALSE;
+			_tableResting = true;
 			break;
 		}
 		_jobCv.wait_for(lock, std::chrono::milliseconds(100), [this] {

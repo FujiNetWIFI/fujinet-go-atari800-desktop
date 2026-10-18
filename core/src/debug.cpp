@@ -103,6 +103,7 @@ struct a800debug
 	std::deque<a800debug_sio> sio;
 
 	std::string snapshot[4];
+	bool saved[4] = {};
 };
 
 namespace {
@@ -906,12 +907,13 @@ int a800debug_disassemble(a800debug* d, uint16_t addr, a800debug_line* out, int 
 	int n = 0;
 	if (pc_line)
 		*pc_line = -1;
-	std::vector<std::pair<uint16_t, uint16_t>> bpRanges;
+	struct Range { uint16_t start, end; bool enabled; };
+	std::vector<Range> bpRanges;
 	{
 		std::lock_guard<std::mutex> lock(d->mtx);
 		for (auto& b : d->bps)
 			if (b.type & A800DEBUG_BP_EXEC)
-				bpRanges.push_back({b.start, b.end});
+				bpRanges.push_back({b.start, b.end, b.enabled});
 	}
 	d->im->host.Call([&] {
 		uint16_t pc = addr;
@@ -924,8 +926,8 @@ int a800debug_disassemble(a800debug* d, uint16_t addr, a800debug_line* out, int 
 			if (l->is_pc && pc_line)
 				*pc_line = n;
 			for (auto& r : bpRanges)
-				if (pc >= r.first && pc <= r.second)
-					l->has_breakpoint = 1;
+				if (pc >= r.start && pc <= r.end && l->has_breakpoint != 1)
+					l->has_breakpoint = r.enabled ? 1 : 2;
 			const char* lab = MONITOR_LabelFor(pc, 0);
 			if (lab)
 				snprintf(l->label, sizeof l->label, "%s", lab);
@@ -1466,12 +1468,14 @@ int a800debug_snapshot_save(a800debug* d, int slot)
 	std::string path = d->snapshot[slot];
 	d->im->host.Call([&] { ok = StateSav_SaveAtariState(path.c_str(), "wb", FALSE); },
 	                 A800Host::Kind::Any);
+	if (ok)
+		d->saved[slot] = true;
 	return ok ? 0 : -1;
 }
 
 int a800debug_snapshot_restore(a800debug* d, int slot)
 {
-	if (slot < 0 || slot > 3 || d->snapshot[slot].empty())
+	if (slot < 0 || slot > 3 || !d->saved[slot])
 		return -1;
 	int ok = 0;
 	std::string path = d->snapshot[slot];
@@ -1482,7 +1486,7 @@ int a800debug_snapshot_restore(a800debug* d, int slot)
 
 int a800debug_snapshot_exists(a800debug* d, int slot)
 {
-	return slot >= 0 && slot < 4 && !d->snapshot[slot].empty();
+	return slot >= 0 && slot < 4 && d->saved[slot];
 }
 
 int a800debug_save(a800debug* d, const char* kind, const char* path, char* msg, int msgsz)

@@ -369,6 +369,14 @@ void SessionImpl::BeforeFrame()
 
 	int code = keyCode.load();
 	int shift = keyShift.load();
+	if (code != AKEY_NONE)
+		keyFrames.fetch_add(1);
+	else if (tapLeft.load() > 0) {
+		// a key let go before the Atari saw it: it gets its frames
+		code = tapCode.load();
+		shift = tapShift.load();
+		tapLeft.fetch_sub(1);
+	}
 	if (pasteKey != AKEY_NONE) {
 		code = pasteKey;
 		shift = (pasteKey & AKEY_SHFT) != 0;
@@ -732,7 +740,7 @@ void a800session_release_all(a800session* s)
 	std::lock_guard<std::mutex> lock(im->keyMtx);
 	im->held.clear();
 	im->modShift = im->modCtrl = 0;
-	im->keyCode.store(AKEY_NONE);
+	im->keyCode.store(AKEY_NONE);   // a pending tap (already let go) still lands
 	im->keyShift.store(0);
 }
 
@@ -761,14 +769,24 @@ void session_gamepad_apply(struct a800session* s, int port, int act, int down)
 }
 
 // The Atari takes one key at a time: the most recent one still held.
+// Keyboard lock held. A key pressed and let go within a frame or two (a
+// fast tap, a synthetic one) would never be seen: it stays as a tap until
+// the Atari has had it for KeyMinFrames.
 void SessionImpl::UpdateKey()
 {
-	if (held.empty()) {
-		keyCode.store(AKEY_NONE);
+	const int was = keyCode.load();
+	const int now = held.empty() ? AKEY_NONE : held.back().akey;
+	if (now != was) {
+		if (now == AKEY_NONE && keyFrames.load() < KeyMinFrames) {
+			tapCode.store(was);
+			tapShift.store(keyShift.load());
+			tapLeft.store(KeyMinFrames - keyFrames.load());
+		}
+		else if (now != AKEY_NONE)
+			tapLeft.store(0);
+		keyFrames.store(0);
 	}
-	else {
-		keyCode.store(held.back().akey);
-	}
+	keyCode.store(now);
 	keyShift.store(modShift ? 1 : 0);
 }
 

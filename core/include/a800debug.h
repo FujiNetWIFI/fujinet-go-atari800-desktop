@@ -39,6 +39,8 @@ unsigned a800debug_generation(a800debug *d);
    CONT) or _NEEDS_INPUT (it is asking for more: the A assembler). */
 enum { A800DBG_CMD_OK = 0, A800DBG_CMD_RESUMED = 1, A800DBG_CMD_NEEDS_INPUT = 2 };
 int  a800debug_command(a800debug *d, const char *line, char *dst, int dstsz);
+/* The monitor commands starting with prefix, space-separated; returns the
+   text's length. */
 int  a800debug_completions(a800debug *d, const char *prefix, char *dst, int dstsz);
 
 void a800debug_step(a800debug *d);          /* F7: one instruction */
@@ -78,7 +80,7 @@ void a800debug_write(a800debug *d, uint16_t addr, uint8_t value);
 typedef struct {
     uint16_t address;
     int is_pc;
-    int has_breakpoint;
+    int has_breakpoint;         /* 1 enabled, 2 disabled */
     char bytes[16];
     char label[48];
     char disasm[64];

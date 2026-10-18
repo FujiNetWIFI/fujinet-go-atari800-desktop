@@ -63,6 +63,20 @@ int main(void)
     CHECK(test_wait_text(s, " 2", 3000), "pasted PRINT 1+1");
     CHECK(test_wait_text(s, "HI", 3000), "paste upper-cases");
 
+    /* taps let go at once (fast typing, synthetic keys) still arrive */
+    {
+        static const char word[] = "zq";
+        for (i = 0; word[i]; i++) {
+            a800session_key(s, (uint32_t)word[i], (uint32_t)word[i], 1);
+            a800session_key(s, (uint32_t)word[i], 0, 0);
+            test_sleep_ms(150);
+        }
+        CHECK(test_wait_text(s, "ZQ", 3000), "instant taps reached BASIC");
+        a800session_key(s, A800_KEYSYM_RETURN, 0, 1);
+        a800session_key(s, A800_KEYSYM_RETURN, 0, 0);
+        test_sleep_ms(200);
+    }
+
     /* the on-screen keyboard */
     n = a800session_keyboard_layout(s, &keys);
     CHECK(n > 55, "layout %d keys", n);

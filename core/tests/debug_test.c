@@ -224,6 +224,21 @@ int main(void)
               map.basic_rom);
     }
 
+    /* stopped at a breakpoint, Power Cycle (a frame job) must still run:
+       the breakpoint would otherwise fire for ever as the park lets go */
+    enter_prog(d, 0x0600);
+    id = a800debug_breakpoint_add(d, A800DEBUG_BP_EXEC, 0x0605, 0x0605, "", msg, sizeof msg);
+    a800debug_resume(d);
+    CHECK(wait_stop(d, why, sizeof why) && cpu(d).pc == 0x0605, "bp before power cycle");
+    CHECK(a800session_power_cycle(s) == 0, "power cycle at a breakpoint");
+    CHECK(test_wait_text(s, "Ready", 8000), "BASIC after a power cycle at a breakpoint");
+    a800debug_breakpoint_clear(d);
+    a800debug_stop(d);
+    CHECK(wait_stop(d, why, sizeof why), "stopped again");
+    for (i = 0; i < (int)sizeof prog; i++)
+        a800debug_write(d, (uint16_t)(0x0600 + i), prog[i]);
+    a800debug_write(d, 0x0620, 0x02);
+
     /* a CIM, attached: a stop */
     a800debug_cpu_set(d, A800_REG_PC, 0x0620);
     a800debug_resume(d);
@@ -257,6 +272,13 @@ int main(void)
     CHECK(i < rc, "no sector 1 read (first: %s %s)", sio[0].path, sio[0].text);
     a800debug_detach(d);
 
+    /* quitting with the PC on an execution breakpoint must not hang */
+    a800debug_attach(d);
+    CHECK(wait_stop(d, why, sizeof why), "attach before quitting");
+    enter_prog(d, 0x0600);
+    for (i = 0; i < (int)sizeof prog; i++)
+        a800debug_write(d, (uint16_t)(0x0600 + i), prog[i]);
+    a800debug_breakpoint_add(d, A800DEBUG_BP_EXEC, 0x0600, 0x0600, "", msg, sizeof msg);
     a800session_free(s);
     printf("debug ok\n");
     return 0;

@@ -74,6 +74,9 @@ struct SessionImpl
 	std::atomic<bool> positional { false };
 	std::atomic<bool> fkeys1200 { false };
 	std::atomic<int> oskKey { -1 };             // on-screen keyboard's
+	static constexpr int KeyMinFrames = 3;
+	std::atomic<int> keyFrames { 0 };           // frames the key has been seen
+	std::atomic<int> tapCode { -1 }, tapShift { 0 }, tapLeft { 0 };
 	void UpdateKey();
 	bool cx85Fitted();
 
