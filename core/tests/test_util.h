@@ -10,14 +10,18 @@
 #include "a800session.h"
 #include "test_tmpdir.h"
 
-#define CHECK(cond, ...) do { if (!(cond)) { fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
-    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); exit(1); } } while (0)
-
 static inline void test_sleep_ms(int ms)
 {
     struct timespec ts = {ms / 1000, (long)(ms % 1000) * 1000000L};
     nanosleep(&ts, NULL);
 }
+
+/* FujiNet's runtime captures stderr into its log: give its log thread a
+   moment to pass the message on before exiting. */
+#define CHECK(cond, ...) do { if (!(cond)) { fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
+    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); fflush(stderr); \
+    test_sleep_ms(500); _exit(1); } } while (0)
+
 
 /* A session in a fresh XDG tree. With FujiNet, its own fnconfig.ini: the
    SD card and no network hosts (tests never touch real servers). */

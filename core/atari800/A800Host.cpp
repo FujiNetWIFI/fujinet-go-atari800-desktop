@@ -138,6 +138,8 @@ void A800Host::Stop()
 	pthread_join(_thread, nullptr);
 	_threadStarted = false;
 	_running.store(false);
+	if (gHost == this)
+		gHost = nullptr;
 	// whatever is still queued never runs; wake its waiters
 	{
 		std::lock_guard<std::mutex> lock(_jobLock);

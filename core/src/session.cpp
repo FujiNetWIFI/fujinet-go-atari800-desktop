@@ -246,6 +246,12 @@ bool SessionImpl::CoreInit(std::string& err)
 	Sound_latency = 0;
 	// atari800's Exit frees the peripherals but leaves them "enabled";
 	// only the flags in argv may turn them on again
+	if (BINLOAD_bin_file) {
+		fclose(BINLOAD_bin_file);
+		BINLOAD_bin_file = NULL;
+	}
+	BINLOAD_start_binloading = FALSE;
+	BINLOAD_loading_basic = 0;
 	XEP80_enabled = AF80_enabled = BIT3_enabled = FALSE;
 	PBI_MIO_enabled = PBI_BB_enabled = FALSE;
 	VOICEBOX_enabled = FALSE;
@@ -292,6 +298,13 @@ bool SessionImpl::CoreReinit(std::string& err)
 
 void SessionImpl::ColdStart()
 {
+	// a program Open loaded earlier must not load again at power-on
+	if (BINLOAD_bin_file) {
+		fclose(BINLOAD_bin_file);
+		BINLOAD_bin_file = NULL;
+	}
+	BINLOAD_start_binloading = FALSE;
+	BINLOAD_loading_basic = 0;
 	suppressReset = true;
 	Atari800_Coldstart();
 	suppressReset = false;
