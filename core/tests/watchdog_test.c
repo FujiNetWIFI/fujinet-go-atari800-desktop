@@ -11,26 +11,41 @@
 #include <unistd.h>
 #endif
 
-static void http_get(const char *path)
+static void close_fd(int fd)
 {
-    char req[256], buf[512];
-    struct sockaddr_in a;
-    int fd = (int)socket(AF_INET, SOCK_STREAM, 0);
-    CHECK(fd >= 0, "socket");
-    memset(&a, 0, sizeof a);
-    a.sin_family = AF_INET;
-    a.sin_port = htons(A800SESSION_WEBUI_PORT);
-    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    CHECK(connect(fd, (struct sockaddr *)&a, sizeof a) == 0, "connect web UI");
-    snprintf(req, sizeof req, "GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path);
-    CHECK(send(fd, req, (int)strlen(req), 0) > 0, "send");
-    while (recv(fd, buf, sizeof buf, 0) > 0)
-        ;
 #if defined(_WIN32)
     closesocket(fd);
 #else
     close(fd);
 #endif
+}
+
+/* The web server can come up after the NetSIO link does (after a restart):
+   connect retries for a few seconds. */
+static void http_get(const char *path)
+{
+    char req[256], buf[512];
+    struct sockaddr_in a;
+    int fd = -1, t;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons(A800SESSION_WEBUI_PORT);
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    for (t = 0; t < 5000; t += 100) {
+        fd = (int)socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(fd >= 0, "socket");
+        if (connect(fd, (struct sockaddr *)&a, sizeof a) == 0)
+            break;
+        close_fd(fd);
+        fd = -1;
+        test_sleep_ms(100);
+    }
+    CHECK(fd >= 0, "connect web UI");
+    snprintf(req, sizeof req, "GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path);
+    CHECK(send(fd, req, (int)strlen(req), 0) > 0, "send");
+    while (recv(fd, buf, sizeof buf, 0) > 0)
+        ;
+    close_fd(fd);
 }
 
 static int wait_event(a800session *s, unsigned gen, const char *text, int ms)

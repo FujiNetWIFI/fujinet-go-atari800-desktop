@@ -4,6 +4,11 @@
 # a800_add_core(<target> <staged dir> [STOCK]) -- STOCK builds the unpatched
 # tree for the A/B tests (deterministic, unthrottled).
 
+# Static on Windows: the shipped folder carries no zlib1.dll (release.yml
+# checks the exe's imports)
+if(WIN32)
+  set(ZLIB_USE_STATIC_LIBS ON)
+endif()
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
