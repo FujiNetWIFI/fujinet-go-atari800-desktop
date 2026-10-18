@@ -85,8 +85,8 @@ int main(void)
     CHECK(i < n, "XL has HELP");
     for (i = 0; i < n && strcmp(keys[i].label, "7"); i++)
         ;
+    /* clicked and let go at once: it still lands */
     a800session_keyboard_press(s, keys[i].index, 1);
-    test_sleep_ms(80);
     CHECK(a800session_keyboard_held(s, keys[i].index), "7 held");
     a800session_keyboard_press(s, keys[i].index, 0);
     CHECK(test_wait_text(s, "\n  7", 3000), "the on-screen 7 reached BASIC");

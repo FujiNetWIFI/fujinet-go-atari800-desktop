@@ -341,14 +341,19 @@ void a800session_keyboard_press(a800session* s, int index, int down)
 	default:
 		break;
 	}
+	// a click shorter than KeyMinFrames (or one the emulation thread was
+	// too busy to see) stays down until the Atari has had it
+	std::lock_guard<std::mutex> lock(im->pasteMtx);
 	if (down) {
 		unsigned l = osk_latch.load();
 		int code = k.code | ((l & 1) ? AKEY_SHFT : 0) | ((l & 2) ? AKEY_CTRL : 0);
 		im->oskKey.store(code);
+		im->oskFrames = 0;
+		im->oskUp = false;
 		osk_down.store(index);
 	}
 	else {
-		im->oskKey.store(AKEY_NONE);
+		im->oskUp = true;
 		osk_down.store(-1);
 		osk_latch.store(0);
 	}
@@ -440,8 +445,13 @@ void SessionImpl::PasteStep()
 {
 	std::lock_guard<std::mutex> lock(pasteMtx);
 	int k = oskKey.load();
+	if (k != AKEY_NONE && oskUp && oskFrames >= KeyMinFrames) {
+		oskKey.store(AKEY_NONE);
+		k = AKEY_NONE;
+	}
 	if (k != AKEY_NONE && pasteQueue.empty()) {
 		pasteKey = k;
+		oskFrames++;
 		return;
 	}
 	if (pasteQueue.empty()) {
