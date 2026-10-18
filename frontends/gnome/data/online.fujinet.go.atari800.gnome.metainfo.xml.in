@@ -60,6 +60,13 @@
     <release version="@PROJECT_VERSION@" date="2026-10-18">
       <description>
         <p>
+          On-screen keys hold for 3 frames, so a quick click is never lost.
+        </p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-10-18">
+      <description>
+        <p>
           First release: atari800 with an in-process FujiNet over NetSIO,
           every 8-bit model, built-in AltirraOS, native GNOME, KDE, macOS and
           Windows frontends, the keyboard and joysticks on screen, hotplugged

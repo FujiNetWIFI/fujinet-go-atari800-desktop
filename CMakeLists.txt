@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT DEFINED CMAKE_OSX_DEPLOYMENT
 endif()
 
 # The only place the version lives (About boxes, bundle, release checks).
-project(fujinet-go-atari800-desktop VERSION 0.1.0 LANGUAGES C CXX)
+project(fujinet-go-atari800-desktop VERSION 0.1.1 LANGUAGES C CXX)
 
 add_compile_definitions(A800_VERSION_STRING="${PROJECT_VERSION}")
 
