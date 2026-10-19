@@ -10,18 +10,20 @@
  * Cursor; click its left edge, or double-click it, for its breakpoint),
  * ANTIC and its display list, GTIA (players, missiles, colours, collisions
  * and the palette), POKEY & PIA, the Memory Map and cartridge, Breakpoints
- * and watchpoints, and the SIO command trace. The toolbar carries the
- * stepping controls, the snapshots, symbol loading and file saves; the
- * family's keys apply (F5 run/stop, F7 step, F8 step over, Shift+F8 step
- * out, F9 frame, F12 close).
+ * and watchpoints, the SIO command trace, and FujiNet (every NetSIO byte
+ * both ways as SIO packets, from session start, beside NetSIO's state and
+ * POKEY's serial port). The toolbar carries the stepping controls, the
+ * snapshots, symbol loading and file saves; the family's keys apply (F5
+ * run/stop, F7 step, F8 step over, Shift+F8 step out, F9 frame, F12 close).
  *
  * Showing the window attaches (which stops the machine, as on every
  * sibling); hiding it detaches and lets the machine run on.
  *
  * A short timer polls the engine's generation and refreshes the tab showing
  * when it moved; while the machine runs, the status, the registers and the
- * SIO trace refresh twice a second. At each stop the console takes the
- * banner and registers atari800 printed, as its own monitor shows them.
+ * SIO and FujiNet traces refresh twice a second. At each stop the console
+ * takes the banner and registers atari800 printed, as its own monitor shows
+ * them.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -77,6 +79,7 @@
 #define MEM_ROWS 256            /* 4K of memory, 16 bytes a row */
 #define HISTORY_MAX 64
 #define SIO_MAX 512
+#define FUJI_MAX 512
 #define BP_MAX 64
 #define CONSOLE_LINES 5000
 #define SNAPSHOTS 4
@@ -89,7 +92,7 @@
 namespace {
 
 enum { TAB_CONSOLE, TAB_CPU, TAB_DISASM, TAB_ANTIC, TAB_GTIA, TAB_POKEY, TAB_MAP,
-       TAB_BREAKS, TAB_SIO, TAB_COUNT };
+       TAB_BREAKS, TAB_SIO, TAB_FUJINET, TAB_COUNT };
 
 /* The tabs, in order: the names A800_DEBUGGER_TAB takes, and their labels
  * (which it takes too). */
@@ -97,6 +100,7 @@ const struct { const char *name, *label; } kTabs[TAB_COUNT] = {
     { "console", "Console" }, { "cpu", "CPU & Memory" }, { "disassembly", "Disassembly" },
     { "antic", "ANTIC" }, { "gtia", "GTIA" }, { "pokey", "POKEY & PIA" },
     { "map", "Memory Map" }, { "breakpoints", "Breakpoints" }, { "sio", "SIO" },
+    { "fujinet", "FujiNet" },
 };
 
 const int kRegs[6] = { A800_REG_PC, A800_REG_SP, A800_REG_A, A800_REG_X, A800_REG_Y, A800_REG_P };
@@ -326,6 +330,7 @@ private:
     QWidget *buildGtia();
     QWidget *buildBreaks();
     QWidget *buildSio();
+    QWidget *buildFujinet();
 
     void refreshStatus();
     void refreshCpu();
@@ -338,6 +343,7 @@ private:
     void refreshMap();
     void refreshBps();
     void refreshSio(bool force);
+    void refreshFujinet(bool force);
     void refreshSnapshots();
     void refreshPage(int page);
     void refreshAll();
@@ -444,6 +450,12 @@ private:
     QLabel *m_sioNote = nullptr;
     int m_sioCount = -1;
     a800debug_sio m_sioLast;
+
+    /* fujinet */
+    QPlainTextEdit *m_fujiText = nullptr, *m_fujiState = nullptr;
+    QLabel *m_fujiNote = nullptr;
+    int m_fujiCount = -1;
+    uint64_t m_fujiLast = 0;
 };
 
 QPointer<DebuggerWindow> s_win;
@@ -495,6 +507,7 @@ DebuggerWindow::DebuggerWindow(a800session *session, QWidget *parent)
     pages[TAB_MAP] = m_map = monoView();
     pages[TAB_BREAKS] = buildBreaks();
     pages[TAB_SIO] = buildSio();
+    pages[TAB_FUJINET] = buildFujinet();
     for (int i = 0; i < TAB_COUNT; ++i)
         m_tabs->addTab(pages[i], QString::fromUtf8(kTabs[i].label).replace(QLatin1Char('&'), QLatin1String("&&")));
     /* the stop reason at the end of the tab row (the toolbar row is full) */
@@ -959,6 +972,42 @@ QWidget *DebuggerWindow::buildSio()
     m_sio = monoView();
     v->addWidget(m_sio, 1);
     return w;
+}
+
+QWidget *DebuggerWindow::buildFujinet()
+{
+    auto *split = new QSplitter(Qt::Horizontal);
+    auto *left = new QWidget;
+    auto *lv = new QVBoxLayout(left);
+    lv->setContentsMargins(0, 0, 0, 0);
+    lv->addWidget(titleLabel(QStringLiteral("SIO packets over NetSIO")));
+    auto *row = new QHBoxLayout;
+    m_fujiNote = hintLabel(QString());
+    auto *clear = new QPushButton(QStringLiteral("Clear"));
+    connect(clear, &QPushButton::clicked, this, [this] {
+        a800debug_fujinet_trace_clear(m_dbg);
+        refreshFujinet(true);
+    });
+    row->addWidget(m_fujiNote, 1);
+    row->addWidget(clear);
+    lv->addLayout(row);
+    m_fujiText = monoView();
+    lv->addWidget(m_fujiText, 1);
+    left->setMinimumWidth(560);
+
+    auto *right = new QWidget;
+    auto *rv = new QVBoxLayout(right);
+    rv->setContentsMargins(0, 0, 0, 0);
+    rv->addWidget(titleLabel(QStringLiteral("NetSIO and POKEY's serial port")));
+    m_fujiState = monoView();
+    rv->addWidget(m_fujiState, 1);
+    right->setMinimumWidth(320);
+    split->addWidget(left);
+    split->addWidget(right);
+    split->setStretchFactor(0, 3);
+    split->setStretchFactor(1, 2);
+    split->setChildrenCollapsible(false);
+    return split;
 }
 
 /* ---- refresh -------------------------------------------------------------- */
@@ -1511,6 +1560,35 @@ void DebuggerWindow::refreshSio(bool force)
     setText(m_sio, cleanText(t.toUtf8().constData()), force || atEnd(m_sio));
 }
 
+void DebuggerWindow::refreshFujinet(bool force)
+{
+    static a800_fuji_packet p[FUJI_MAX];
+    static char state[2048];
+    const int n = a800debug_fujinet_trace(m_dbg, p, FUJI_MAX);
+    if (!a800session_fujinet_running(m_session))
+        m_fujiNote->setText(QStringLiteral("FujiNet is off (Preferences ▸ FujiNet)."));
+    else
+        m_fujiNote->setText(a800session_fujinet_link(m_session)
+                                ? QStringLiteral("FujiNet is on NetSIO, connected.")
+                                : QStringLiteral("FujiNet is on NetSIO, not connected."));
+    state[0] = '\0';
+    a800debug_fujinet_state(m_dbg, state, sizeof state);
+    setText(m_fujiState, cleanText(state));
+
+    /* a log: set again only when it moved */
+    if (!force && n == m_fujiCount && (n == 0 || p[n - 1].serial == m_fujiLast)) return;
+    m_fujiCount = n;
+    m_fujiLast = n > 0 ? p[n - 1].serial : 0;
+    QString t;
+    for (int i = 0; i < n; ++i) {
+        appendf(t, "%s%s\n     ", i ? "\n" : "", p[i].text);
+        for (int k = 0; k < p[i].nbytes && k < (int)sizeof p[i].data; k++) appendf(t, "%02X ", p[i].data[k]);
+        if (p[i].nbytes > (int)sizeof p[i].data) t += QStringLiteral("…");
+    }
+    if (n == 0) t = QStringLiteral("(no SIO packets since the trace was cleared)");
+    setText(m_fujiText, cleanText(t.toUtf8().constData()), force || atEnd(m_fujiText));
+}
+
 void DebuggerWindow::refreshSnapshots()
 {
     const bool fuji = a800session_fujinet_running(m_session) != 0;
@@ -1535,6 +1613,7 @@ void DebuggerWindow::refreshPage(int page)
     case TAB_MAP: refreshMap(); break;
     case TAB_BREAKS: refreshBps(); break;
     case TAB_SIO: refreshSio(false); break;
+    case TAB_FUJINET: refreshFujinet(false); break;
     default: break;
     }
 }
@@ -1607,6 +1686,7 @@ void DebuggerWindow::tick()
         refreshStatus();
         if (page == TAB_CPU) refreshCpu();
         if (page == TAB_SIO) refreshSio(false);
+        if (page == TAB_FUJINET) refreshFujinet(false);
     }
 }
 

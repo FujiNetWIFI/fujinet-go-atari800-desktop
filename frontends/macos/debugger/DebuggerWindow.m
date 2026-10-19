@@ -10,18 +10,20 @@
  * Cursor; click its left edge, or double-click it, for its breakpoint),
  * ANTIC and its display list, GTIA (players, missiles, colours, collisions
  * and the palette), POKEY & PIA, the Memory Map and cartridge, Breakpoints
- * and watchpoints, and the SIO command trace. The toolbar carries the
- * stepping controls, the snapshots, symbol loading and file saves; the
- * family's keys apply (F5 run/stop, F7 step, F8 step over, Shift+F8 step
- * out, F9 frame, F12 close).
+ * and watchpoints, the SIO command trace, and FujiNet (every NetSIO byte
+ * both ways as SIO packets, from session start, beside NetSIO's state and
+ * POKEY's serial port). The toolbar carries the stepping controls, the
+ * snapshots, symbol loading and file saves; the family's keys apply (F5
+ * run/stop, F7 step, F8 step over, Shift+F8 step out, F9 frame, F12 close).
  *
  * Showing the window attaches (which stops the machine, as on every
  * sibling); closing it detaches and lets the machine run on.
  *
  * A short timer polls the engine's generation and refreshes the tab showing
  * when it moved; while the machine runs, the status, the registers and the
- * SIO trace refresh twice a second. At each stop the console takes the
- * banner and registers atari800 printed, as its own monitor shows them.
+ * SIO and FujiNet traces refresh twice a second. At each stop the console
+ * takes the banner and registers atari800 printed, as its own monitor shows
+ * them.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -45,6 +47,7 @@
 #define MEM_ROWS 256            /* 4K of memory, 16 bytes a row */
 #define HISTORY_MAX 64
 #define SIO_MAX 512
+#define FUJI_MAX 512
 #define BP_MAX 64
 #define CONSOLE_KEEP 262144u    /* the console transcript's characters kept */
 #define SNAPSHOTS 4
@@ -56,7 +59,7 @@
 #define NUM_SAVES 2
 
 enum { TAB_CONSOLE, TAB_CPU, TAB_DISASM, TAB_ANTIC, TAB_GTIA, TAB_POKEY, TAB_MAP,
-       TAB_BREAKS, TAB_SIO, TAB_COUNT };
+       TAB_BREAKS, TAB_SIO, TAB_FUJINET, TAB_COUNT };
 
 /* The tabs, in order: the names A800_DEBUGGER_TAB takes, and their labels
  * (which it takes too). */
@@ -64,6 +67,7 @@ static const struct { const char *name, *label; } kTabs[TAB_COUNT] = {
     { "console", "Console" }, { "cpu", "CPU & Memory" }, { "disassembly", "Disassembly" },
     { "antic", "ANTIC" }, { "gtia", "GTIA" }, { "pokey", "POKEY & PIA" },
     { "map", "Memory Map" }, { "breakpoints", "Breakpoints" }, { "sio", "SIO" },
+    { "fujinet", "FujiNet" },
 };
 
 static const int kRegs[6] = { A800_REG_PC, A800_REG_SP, A800_REG_A, A800_REG_X, A800_REG_Y, A800_REG_P };
@@ -637,6 +641,12 @@ static const char *bpTypeName(int type)
     NSTextField *_sioNote;
     int _sioCount;
     a800debug_sio _sioLast;
+
+    /* fujinet */
+    NSTextView *_fujiText, *_fujiState;
+    NSTextField *_fujiNote;
+    int _fujiCount;
+    uint64_t _fujiLast;
 }
 
 /* ---- lifetime ---------------------------------------------------------------- */
@@ -653,6 +663,7 @@ static const char *bpTypeName(int type)
     _disasmTop = 0xE000;
     _selected = -1;
     _sioCount = -1;
+    _fujiCount = -1;
     memset(_swatchRgb, 0xFF, sizeof _swatchRgb);
     memset(&_sioLast, 0, sizeof _sioLast);
     _palettePx = calloc((size_t)A800DEBUG_PALETTE_WIDTH * A800DEBUG_PALETTE_HEIGHT, sizeof *_palettePx);
@@ -1195,6 +1206,30 @@ static const char *bpTypeName(int type)
     return v;
 }
 
+- (NSView *)buildFujinet
+{
+    _fujiNote = [self hint:@""];
+    [_fujiNote setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+    NSStackView *row = hstack(@[_fujiNote, [self button:@"Clear" action:@selector(fujiClear:)]]);
+    row.distribution = NSStackViewDistributionFill;
+    NSScrollView *fujiScroll, *stateScroll;
+    _fujiText = monoView(&fujiScroll, NO);
+    _fujiState = monoView(&stateScroll, NO);
+    NSStackView *left = vstack(@[[self heading:@"SIO packets over NetSIO"], row, fujiScroll]);
+    fillWidth(left, row, 0);
+    fillWidth(left, fujiScroll, 0);
+    NSStackView *right = vstack(@[[self heading:@"NetSIO and POKEY's serial port"], stateScroll]);
+    fillWidth(right, stateScroll, 0);
+    NSStackView *split = hstack(@[left, right]);
+    split.distribution = NSStackViewDistributionFill;
+    stretchy(left, NSLayoutConstraintOrientationHorizontal);
+    [left.widthAnchor constraintGreaterThanOrEqualToConstant:520].active = YES;
+    [right.widthAnchor constraintEqualToConstant:340].active = YES;
+    fillHeight(split, left);
+    fillHeight(split, right);
+    return split;
+}
+
 - (void)buildWindow
 {
     _window = [[NSWindow alloc]
@@ -1223,6 +1258,7 @@ static const char *bpTypeName(int type)
     pages[TAB_MAP] = mapScroll;
     pages[TAB_BREAKS] = [self buildBreaks];
     pages[TAB_SIO] = [self buildSio];
+    pages[TAB_FUJINET] = [self buildFujinet];
 
     _tabs = [[NSTabView alloc] init];
     for (int i = 0; i < TAB_COUNT; i++) {
@@ -1759,6 +1795,35 @@ static const char *bpTypeName(int type)
     setText(_sio, tdone(&t), follow);
 }
 
+- (void)refreshFujinet:(BOOL)force
+{
+    static a800_fuji_packet p[FUJI_MAX];
+    static char state[2048];
+    const int n = a800debug_fujinet_trace(_dbg, p, FUJI_MAX);
+    if (!a800session_fujinet_running(_session))
+        _fujiNote.stringValue = @"FujiNet is off (Settings ▸ FujiNet).";
+    else
+        _fujiNote.stringValue = a800session_fujinet_link(_session) ? @"FujiNet is on NetSIO, connected."
+                                                                  : @"FujiNet is on NetSIO, not connected.";
+    state[0] = '\0';
+    a800debug_fujinet_state(_dbg, state, (int)sizeof state);
+    setText(_fujiState, textFrom(state), NO);
+
+    /* a log: set again only when it moved */
+    if (!force && n == _fujiCount && (n == 0 || p[n - 1].serial == _fujiLast)) return;
+    _fujiCount = n;
+    _fujiLast = n > 0 ? p[n - 1].serial : 0;
+    const BOOL follow = force || atEnd(_fujiText);
+    Text t = { NULL, 0, 0 };
+    for (int i = 0; i < n; i++) {
+        tadd(&t, "%s%s\n     ", i ? "\n" : "", p[i].text);
+        for (int k = 0; k < p[i].nbytes && k < (int)sizeof p[i].data; k++) tadd(&t, "%02X ", p[i].data[k]);
+        if (p[i].nbytes > (int)sizeof p[i].data) tadd(&t, "…");
+    }
+    if (n == 0) tadd(&t, "(no SIO packets since the trace was cleared)");
+    setText(_fujiText, tdone(&t), follow);
+}
+
 - (void)refreshSnapshots
 {
     const BOOL fuji = a800session_fujinet_running(_session) != 0;
@@ -1783,6 +1848,7 @@ static const char *bpTypeName(int type)
     case TAB_MAP: [self refreshMap]; break;
     case TAB_BREAKS: [self refreshBps]; break;
     case TAB_SIO: [self refreshSio:NO]; break;
+    case TAB_FUJINET: [self refreshFujinet:NO]; break;
     default: break;
     }
 }
@@ -1858,6 +1924,7 @@ static const char *bpTypeName(int type)
         [self refreshStatus];
         if (page == TAB_CPU) [self refreshCpu];
         if (page == TAB_SIO) [self refreshSio:NO];
+        if (page == TAB_FUJINET) [self refreshFujinet:NO];
     }
 }
 
@@ -2300,6 +2367,13 @@ static const char *bpTypeName(int type)
     (void)sender;
     a800debug_sio_clear(_dbg);
     [self refreshSio:YES];
+}
+
+- (void)fujiClear:(id)sender
+{
+    (void)sender;
+    a800debug_fujinet_trace_clear(_dbg);
+    [self refreshFujinet:YES];
 }
 
 - (void)loadSymbols:(id)sender

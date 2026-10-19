@@ -2,7 +2,8 @@
  * a800debug -- the debugger engine every frontend's debugger window drives:
  * atari800's 6502 stopped and stepped, its memory, ANTIC, GTIA, POKEY, PIA,
  * the memory map and cartridge, breakpoints and watchpoints, the SIO
- * command trace, and atari800's own monitor as a console.
+ * command trace, FujiNet's NetSIO traffic, and atari800's own monitor as a
+ * console.
  *
  * Attaching stops the machine; detaching lets it run (breakpoints stay,
  * disarmed). Calls are safe from any thread.
@@ -184,6 +185,22 @@ typedef struct {
 } a800debug_sio;
 int  a800debug_sio_trace(a800debug *d, a800debug_sio *out, int max);
 void a800debug_sio_clear(a800debug *d);
+
+/* ---- FujiNet: every NetSIO byte, as SIO packets (always on) --------------- */
+typedef struct {
+    uint64_t serial;
+    int      to_host;       /* 1: FujiNet -> Atari, 0: Atari -> FujiNet */
+    int      device, command;   /* the exchange's command frame, -1 none */
+    int      length;        /* data bytes (checksum not counted), -1 none */
+    int      nbytes;        /* bytes on the wire */
+    uint8_t  data[64];      /* their first bytes */
+    char     text[96];      /* "-> CMD 70 E8 00 00 [59 ok] FujiNet GET ADAPTERCONFIG" */
+    uint32_t repeat;        /* the same exchange this many times in a row */
+} a800_fuji_packet;
+int  a800debug_fujinet_trace(a800debug *d, a800_fuji_packet *out, int max);  /* oldest first */
+void a800debug_fujinet_trace_clear(a800debug *d);
+/* NetSIO's state and POKEY's serial port, as text lines. */
+int  a800debug_fujinet_state(a800debug *d, char *dst, int dstsz);
 
 /* ---- snapshots (temporary save states) ------------------------------------ */
 /* Slots 0-3. With FujiNet on, restoring replays SIO traffic FujiNet has

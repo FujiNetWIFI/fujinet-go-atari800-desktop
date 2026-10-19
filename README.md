@@ -53,8 +53,10 @@ Frame F9. Tabs: atari800's monitor as a console (including the `A`
 assembler), CPU and memory, disassembly with OS labels and symbol files
 (ld65 `-Ln`, VICE, MADS, atari800), ANTIC and the display list, GTIA and the
 palette, POKEY and PIA, the memory map and cartridge, breakpoints and
-watchpoints with conditions (atari800's table holds 20 conditions), and every
-SIO command. A CIM stops into it.
+watchpoints with conditions (atari800's table holds 20 conditions), every
+SIO command, and FujiNet: every NetSIO byte both ways as SIO packets (frame,
+ACK, COMPLETE, data and checksums, with hex), recorded from start-up. A CIM
+stops into it.
 
 ## Building
 

@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "a800debug.h"
+#include "fuji_trace.h"
 #include "session_impl.h"
 
 extern "C" {
@@ -36,6 +37,7 @@ extern "C" {
 #include "gtia.h"
 #include "memory.h"
 #include "monitor.h"
+#include "netsio.h"
 #include "pia.h"
 #include "pokey.h"
 #include "sio.h"
@@ -102,13 +104,17 @@ struct a800debug
 	// the SIO trace
 	std::deque<a800debug_sio> sio;
 
+	// FujiNet's NetSIO bytes, from session start (emulation thread in)
+	std::mutex fujiMtx;
+	fuji_trace* fuji = nullptr;
+
 	std::string snapshot[4];
 	bool saved[4] = {};
 };
 
 namespace {
 
-a800debug* g_debug;   // for the SIO hook and the monitor's input hook
+a800debug* g_debug;   // for the SIO hooks and the monitor's input hook
 UWORD g_dlistStart;   // the display list this frame began with
 
 // ANTIC_dlist is where ANTIC is fetching: the list's start only once the
@@ -318,29 +324,6 @@ std::string table_reason(a800debug* d, uint16_t pc)
 
 // ---- the SIO trace -----------------------------------------------------------
 
-const char* sio_command_name(uint8_t dev, uint8_t cmd)
-{
-	if (dev >= 0x31 && dev <= 0x38) {
-		switch (cmd) {
-		case 0x52: return "READ SECTOR";
-		case 0x50: return "PUT SECTOR";
-		case 0x57: return "WRITE SECTOR";
-		case 0x53: return "STATUS";
-		case 0x21: return "FORMAT";
-		case 0x22: return "FORMAT ENHANCED";
-		case 0x4e: return "READ PERCOM";
-		case 0x4f: return "WRITE PERCOM";
-		case 0x3f: return "HSIO INDEX";
-		default: break;
-		}
-	}
-	if (dev == 0x70)
-		return "FUJINET";
-	if (dev >= 0x71 && dev <= 0x78)
-		return "NETWORK";
-	return "";
-}
-
 void sio_hook(const UBYTE* frame, int path)
 {
 	a800debug* d = g_debug;
@@ -371,6 +354,23 @@ void sio_hook(const UBYTE* frame, int path)
 	d->sio.push_back(e);
 	if (d->sio.size() > 512)
 		d->sio.pop_front();
+}
+
+// ---- the FujiNet trace ---------------------------------------------------------
+
+static_assert((int)SIO_BYTE_OUT == FUJI_TRACE_OUT && (int)SIO_BYTE_IN == FUJI_TRACE_IN
+              && (int)SIO_BYTE_IN_NONE == FUJI_TRACE_IN_NONE
+              && (int)SIO_BYTE_CMD_ON == FUJI_TRACE_CMD_ON
+              && (int)SIO_BYTE_CMD_OFF == FUJI_TRACE_CMD_OFF, "SIO_byte_hook events");
+
+// Every byte NetSIO carries, both ways (the serial path is not FujiNet's).
+void fuji_byte_hook(int event, int byte, int path)
+{
+	a800debug* d = g_debug;
+	if (!d || path == SIO_TRACE_SERIAL)
+		return;
+	std::lock_guard<std::mutex> lock(d->fujiMtx);
+	fuji_trace_event(d->fuji, event, byte, path == SIO_TRACE_NETSTREAM);
 }
 
 // ---- the monitor's input -----------------------------------------------------
@@ -547,6 +547,7 @@ void session_debug_free(struct a800session* s)
 	if (g_debug == d) {
 		g_debug = nullptr;
 		SIO_trace_hook = nullptr;
+		SIO_byte_hook = nullptr;
 		MONITOR_gets_hook = nullptr;
 		mon_output = stdout;
 	}
@@ -555,6 +556,7 @@ void session_debug_free(struct a800session* s)
 			remove(p.c_str());
 	if (d->out)
 		fclose(d->out);
+	fuji_trace_free(d->fuji);
 	delete d;
 	s->debugger = nullptr;
 }
@@ -570,9 +572,18 @@ a800debug* a800debug_get(a800session* s)
 		a800debug* d = new a800debug;
 		d->s = s;
 		d->im = Impl(s);
+		d->fuji = fuji_trace_new();
 		s->debugger = d;
 	}
 	return static_cast<a800debug*>(s->debugger);
+}
+
+// The FujiNet trace is always on: it is cheap, and it is most useful about
+// what happened before anyone thought to look.
+void session_debug_trace_install(struct a800session* s)
+{
+	g_debug = a800debug_get(s);
+	Impl(s)->host.Call([] { SIO_byte_hook = fuji_byte_hook; }, A800Host::Kind::Any);
 }
 
 void a800debug_attach(a800debug* d)
@@ -1456,6 +1467,100 @@ void a800debug_sio_clear(a800debug* d)
 {
 	std::lock_guard<std::mutex> lock(d->mtx);
 	d->sio.clear();
+}
+
+// ---- the FujiNet trace ---------------------------------------------------------------------
+
+int a800debug_fujinet_trace(a800debug* d, a800_fuji_packet* out, int max)
+{
+	std::lock_guard<std::mutex> lock(d->fujiMtx);
+	return fuji_trace_get(d->fuji, out, max);
+}
+
+void a800debug_fujinet_trace_clear(a800debug* d)
+{
+	std::lock_guard<std::mutex> lock(d->fujiMtx);
+	fuji_trace_clear(d->fuji);
+}
+
+int a800debug_fujinet_state(a800debug* d, char* dst, int dstsz)
+{
+	a800session* s = d->s;
+	if (!s->running)
+		return snprintf(dst, (size_t)dstsz, "The Atari is off\n");
+	struct {
+		int sync_wait, next_write, waiting, netstream, pal;
+		unsigned sync_num;
+	} n = {};
+	d->im->host.Call([&n] {
+		n.sync_wait = netsio_sync_wait;
+		n.next_write = netsio_next_write_size;
+		n.waiting = netsio_enabled ? netsio_available() : 0;
+		n.netstream = netsio_enabled && netsio_netstream_active();
+		n.sync_num = netsio_sync_num;
+		n.pal = Atari800_tv_mode == Atari800_TV_PAL;
+	}, A800Host::Kind::Any);
+	a800debug_pokey p;
+	a800debug_pia pia;
+	a800debug_pokey_get(d, 0, &p);
+	a800debug_pia_get(d, &pia);
+	uint64_t out = 0, in = 0, none = 0, cmds = 0;
+	{
+		std::lock_guard<std::mutex> lock(d->fujiMtx);
+		fuji_trace_counts(d->fuji, &out, &in, &none, &cmds);
+	}
+
+	// short lines: the pane is narrow
+	std::string t;
+	if (!a800session_fujinet_running(s))
+		t += "NetSIO     off\n";
+	else
+		t += fmt("NetSIO     UDP %d, %s\n", A800SESSION_NETSIO_PORT,
+		         a800session_fujinet_link(s) ? "connected" : "not connected");
+	t += fmt("Netstream  %s\n", n.netstream ? "on (raw, no frames)" : "off");
+	t += fmt("Command    %s (PIA CB2)\n", pia.cb2 ? "idle" : "asserted");
+	t += fmt("Motor      %s (PIA CA2)\n", pia.ca2 ? "off" : "on");
+	t += fmt("Sync       #%u, %s\n", n.sync_num, n.sync_wait ? "waiting" : "idle");
+	t += fmt("Next write %d bytes\n", n.next_write);
+	t += fmt("Waiting    %d bytes\n", n.waiting);
+	t += fmt("Sent       %llu bytes\n", (unsigned long long)out);
+	t += fmt("Commands   %llu frames\n", (unsigned long long)cmds);
+	t += fmt("Received   %llu bytes\n", (unsigned long long)in);
+	t += fmt("Empty      %llu reads (none waiting)\n", (unsigned long long)none);
+
+	// the serial port's speed: channels 3+4 joined, as SIO sets them
+	const double clock = n.pal ? 1773447.0 : 1789790.0;
+	int cycles;
+	if (p.audctl & 0x08) {
+		int div = p.audf[2] | (p.audf[3] << 8);
+		cycles = (p.audctl & 0x20) ? div + 7 : (div + 1) * ((p.audctl & 1) ? 114 : 28);
+	}
+	else
+		cycles = (p.audf[3] + 1) * ((p.audctl & 1) ? 114 : 28);
+	t += fmt("\nPOKEY's serial port\n");
+	t += fmt("SKCTL      $%02X  serial mode %d%s\n", p.skctl, (p.skctl >> 4) & 7,
+	         (p.skctl & 8) ? ", two-tone" : "");
+	t += fmt("SKSTAT     $%02X %s%s%s\n", p.skstat, (p.skstat & 0x80) ? "" : " framing error",
+	         (p.skstat & 0x20) ? "" : " overrun", (p.skstat & 0x02) ? " idle" : " receiving");
+	// IRQST is active low
+	auto irqs = [](uint8_t v, bool low) {
+		std::string w;
+		if (((v & 0x20) == 0) == low)
+			w += " SERIN";
+		if (((v & 0x10) == 0) == low)
+			w += " SEROUT";
+		if (((v & 0x08) == 0) == low)
+			w += " XMTDONE";
+		return w.empty() ? std::string(" -") : w;
+	};
+	t += fmt("IRQEN      $%02X  enabled:%s\n", p.irqen, irqs(p.irqen, false).c_str());
+	t += fmt("IRQST      $%02X  pending:%s\n", p.irqst, irqs(p.irqst, true).c_str());
+	t += fmt("AUDCTL     $%02X\n", p.audctl);
+	t += fmt("AUDF3/4    $%02X $%02X\n", p.audf[2], p.audf[3]);
+	t += fmt("Speed      %.0f bit/s\n", clock / (2.0 * cycles));
+	if ((p.audctl & 0x28) != 0x28)
+		t += "           (not 3+4 at 1.79 MHz)\n";
+	return snprintf(dst, (size_t)dstsz, "%s", t.c_str());
 }
 
 // ---- snapshots ------------------------------------------------------------------------------

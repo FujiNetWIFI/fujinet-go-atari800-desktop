@@ -2,9 +2,11 @@
  * Debugger window (Win32) over the session's debugger engine and atari800's
  * own monitor, via core/include/a800debug.h. Mirrors the GTK and Qt
  * debuggers tab for tab -- Console, CPU & Memory, Disassembly, ANTIC, GTIA,
- * POKEY & PIA, Memory Map, Breakpoints, SIO -- built from plain common
- * controls, with the disassembly, the colour registers and the palette
- * drawn by hand.
+ * POKEY & PIA, Memory Map, Breakpoints, SIO, FujiNet -- built from plain
+ * common controls, with the disassembly, the colour registers and the
+ * palette drawn by hand. FujiNet is every NetSIO byte both ways as SIO
+ * packets, from session start, beside NetSIO's state and POKEY's serial
+ * port.
  *
  * The Console is atari800's monitor a line at a time, with Tab completion
  * and a command history; its A assembler prompts for lines. A click on a
@@ -18,9 +20,9 @@
  * sibling); hiding it detaches and lets the machine run on. A timer polls
  * the engine's generation counter and refreshes the tab showing only when
  * something changed; while the machine runs it refreshes the status, the
- * registers and the SIO trace twice a second. At each stop the console
- * takes the banner and registers atari800 printed, as its own monitor
- * shows them.
+ * registers and the SIO and FujiNet traces twice a second. At each stop
+ * the console takes the banner and registers atari800 printed, as its own
+ * monitor shows them.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -48,6 +50,7 @@
 #define HISTORY_MAX 64          /* the last instructions shown */
 #define CMD_HISTORY 100         /* console lines Up/Down recall */
 #define SIO_MAX 512
+#define FUJI_MAX 512
 #define BP_MAX 64
 #define CONSOLE_KEEP (256 * 1024)
 #define SNAPSHOTS 4
@@ -72,7 +75,7 @@
 #define TIMER_REFRESH 1
 
 enum { TAB_CONSOLE, TAB_CPU, TAB_DISASM, TAB_ANTIC, TAB_GTIA, TAB_POKEY, TAB_MAP,
-       TAB_BREAKS, TAB_SIO, TAB_COUNT };
+       TAB_BREAKS, TAB_SIO, TAB_FUJINET, TAB_COUNT };
 
 /* The tabs, in order: the names A800_DEBUGGER_TAB takes, and their labels
  * (which it takes too). */
@@ -80,6 +83,7 @@ static const struct { const char *name, *label; } k_tabs[TAB_COUNT] = {
     { "console", "Console" }, { "cpu", "CPU & Memory" }, { "disassembly", "Disassembly" },
     { "antic", "ANTIC" }, { "gtia", "GTIA" }, { "pokey", "POKEY & PIA" },
     { "map", "Memory Map" }, { "breakpoints", "Breakpoints" }, { "sio", "SIO" },
+    { "fujinet", "FujiNet" },
 };
 
 enum {
@@ -95,6 +99,7 @@ enum {
     IDC_BP_LIST, IDC_BP_REMOVE, IDC_BP_CLEAR, IDC_BP_TYPE, IDC_BP_START, IDC_BP_END, IDC_BP_COND,
     IDC_BP_ADD, IDC_BP_LINE, IDC_BP_LINE_SET,
     IDC_SIO_CLEAR, IDC_SIO_TEXT,
+    IDC_FUJI_CLEAR, IDC_FUJI_TEXT, IDC_FUJI_STATE,
     IDC_SNAP_SAVE0, IDC_SNAP_SAVE_LAST = IDC_SNAP_SAVE0 + SNAPSHOTS - 1,
     IDC_SNAP_RESTORE0, IDC_SNAP_RESTORE_LAST = IDC_SNAP_RESTORE0 + SNAPSHOTS - 1,
     IDC_SAVE_DIS, IDC_SAVE_RAM,
@@ -172,7 +177,12 @@ typedef struct {
     int sio_count;
     a800debug_sio sio_last;
 
-    HWND views[10];             /* the read-only text views, drawn on the window colour */
+    /* fujinet */
+    HWND fuji_title, fuji_note, fuji_clear, fuji_text, fuji_state_title, fuji_state;
+    int fuji_count;
+    uint64_t fuji_last;
+
+    HWND views[12];             /* the read-only text views, drawn on the window colour */
     int nviews;
     HWND dim[40];               /* captions and hints, drawn grey */
     int ndim, nlabels;
@@ -237,6 +247,28 @@ static size_t addf(char *s, size_t len, size_t cap, const char *fmt, ...)
     va_end(ap);
     if (n < 0) return len;
     return len + (size_t)n < cap ? len + (size_t)n : cap - 1;
+}
+
+/* The engine's packet lines carry UTF-8 arrows and a times sign; these
+ * controls are ANSI. */
+static size_t add_ascii(char *s, size_t len, size_t cap, const char *text)
+{
+    static const struct { const char *utf8, *ascii; } k[] = {
+        { "\xe2\x86\x92", "->" }, { "\xe2\x86\x90", "<-" }, { "\xc3\x97", "x" },
+    };
+    size_t i;
+    while (*text && len + 4 < cap) {
+        for (i = 0; i < sizeof k / sizeof k[0]; i++)
+            if (strncmp(text, k[i].utf8, strlen(k[i].utf8)) == 0) break;
+        if (i < sizeof k / sizeof k[0]) {
+            len = addf(s, len, cap, "%s", k[i].ascii);
+            text += strlen(k[i].utf8);
+        } else {
+            s[len++] = *text++;
+            s[len] = '\0';
+        }
+    }
+    return len;
 }
 
 /* Blanks off both ends, in place. */
@@ -433,8 +465,8 @@ static int edit_rows(debugger *d, HWND h)
     return d->mono_h > 0 && c.bottom > d->mono_h ? c.bottom / d->mono_h : 1;
 }
 
-/* Logs (the console, the last instructions, the SIO trace) follow their
- * end while their reader is there. */
+/* Logs (the console, the last instructions, the SIO and FujiNet traces)
+ * follow their end while their reader is there. */
 static int edit_at_end(debugger *d, HWND h)
 {
     const int first = (int)SendMessageA(h, EM_GETFIRSTVISIBLELINE, 0, 0);
@@ -1150,6 +1182,42 @@ static void refresh_sio(debugger *d, int force)
     set_text_at(d->sio_text, t, follow);
 }
 
+static void refresh_fujinet(debugger *d, int force)
+{
+    static a800_fuji_packet p[FUJI_MAX];
+    static char t[FUJI_MAX * 320 + 128];
+    static char state[2048];
+    const int n = a800debug_fujinet_trace(d->dbg, p, FUJI_MAX);
+    size_t len = 0;
+    int i, follow;
+
+    if (!a800session_fujinet_running(d->session))
+        set_label(d->fuji_note, "FujiNet is off (Settings, FujiNet page).");
+    else
+        set_label(d->fuji_note, a800session_fujinet_link(d->session) ? "FujiNet is on NetSIO, connected."
+                                                                     : "FujiNet is on NetSIO, not connected.");
+    state[0] = '\0';
+    a800debug_fujinet_state(d->dbg, state, sizeof state);
+    set_text_at(d->fuji_state, state, 0);
+
+    /* a log: set again only when it moved */
+    if (!force && n == d->fuji_count && (n == 0 || p[n - 1].serial == d->fuji_last)) return;
+    follow = force || d->fuji_count < 0 || edit_at_end(d, d->fuji_text);
+    d->fuji_count = n;
+    d->fuji_last = n > 0 ? p[n - 1].serial : 0;
+    for (i = 0; i < n; i++) {
+        int k;
+        if (i) len = addf(t, len, sizeof t, "\n");
+        len = add_ascii(t, len, sizeof t, p[i].text);
+        len = addf(t, len, sizeof t, "\n     ");
+        for (k = 0; k < p[i].nbytes && k < (int)sizeof p[i].data; k++)
+            len = addf(t, len, sizeof t, "%02X ", p[i].data[k]);
+        if (p[i].nbytes > (int)sizeof p[i].data) len = addf(t, len, sizeof t, "...");
+    }
+    if (n == 0) len = addf(t, len, sizeof t, "(no SIO packets since the trace was cleared)");
+    set_text_at(d->fuji_text, t, follow);
+}
+
 static void refresh_page(debugger *d, int page)
 {
     if (!a800session_is_running(d->session)) return;
@@ -1162,6 +1230,7 @@ static void refresh_page(debugger *d, int page)
     case TAB_MAP: refresh_map(d); break;
     case TAB_BREAKS: refresh_bps(d); break;
     case TAB_SIO: refresh_sio(d, 0); break;
+    case TAB_FUJINET: refresh_fujinet(d, 0); break;
     default: break;
     }
 }
@@ -1237,6 +1306,7 @@ static void tick(debugger *d)
         refresh_status(d);
         if (d->page == TAB_CPU) refresh_cpu(d);
         if (d->page == TAB_SIO) refresh_sio(d, 0);
+        if (d->page == TAB_FUJINET) refresh_fujinet(d, 0);
     }
 }
 
@@ -2172,6 +2242,14 @@ static void build_controls(debugger *d)
     d->sio_note = dim_label(d, "", SS_LEFT | SS_ENDELLIPSIS);
     d->sio_clear = button(d, "Clear", IDC_SIO_CLEAR);
     d->sio_text = view(d, IDC_SIO_TEXT, WS_HSCROLL);
+
+    /* FujiNet */
+    d->fuji_title = label(d, "SIO packets over NetSIO", d->ui_bold, SS_LEFT);
+    d->fuji_note = dim_label(d, "", SS_LEFT | SS_ENDELLIPSIS);
+    d->fuji_clear = button(d, "Clear", IDC_FUJI_CLEAR);
+    d->fuji_text = view(d, IDC_FUJI_TEXT, WS_HSCROLL);
+    d->fuji_state_title = label(d, "NetSIO and POKEY's serial port", d->ui_bold, SS_LEFT);
+    d->fuji_state = view(d, IDC_FUJI_STATE, WS_HSCROLL);
 }
 
 static void show_page(debugger *d, int page)
@@ -2185,6 +2263,8 @@ static void show_page(debugger *d, int page)
     HWND brk[] = { d->bp_budget, d->bp_remove, d->bp_clear, d->bp_type, d->bp_start, d->bp_end, d->bp_cond,
                    d->bp_add, d->bp_line_label, d->bp_line, d->bp_line_set, d->bp_line_hint, d->bp_msg };
     HWND sio[] = { d->sio_note, d->sio_clear, d->sio_text };
+    HWND fuji[] = { d->fuji_title, d->fuji_note, d->fuji_clear, d->fuji_text, d->fuji_state_title,
+                    d->fuji_state };
     size_t i;
     d->page = page;
 #define SHOW(arr, p) for (i = 0; i < sizeof(arr) / sizeof((arr)[0]); i++) \
@@ -2201,6 +2281,7 @@ static void show_page(debugger *d, int page)
     ShowWindow(d->map_text, page == TAB_MAP ? SW_SHOW : SW_HIDE);
     SHOW(brk, TAB_BREAKS);
     SHOW(sio, TAB_SIO);
+    SHOW(fuji, TAB_FUJINET);
 #undef SHOW
     show_bp_list(d);
 }
@@ -2402,6 +2483,22 @@ static void layout(debugger *d)
     place(d->sio_note, px, py + (bh - lh) / 2, pw - w - S(d, 12), lh);
     place(d->sio_clear, px + pw - w, py, w, bh);
     place(d->sio_text, px, py + bh + S(d, 6), pw, ph - bh - S(d, 6));
+
+    /* FujiNet: the packets under their note and Clear, the state beside */
+    {
+        int rw = S(d, 340), lw;
+        if (pw - rw - S(d, 8) < S(d, 560)) rw = pw - S(d, 568) > S(d, 240) ? pw - S(d, 568) : S(d, 240);
+        lw = pw - rw - S(d, 8);
+        w = btn_w(d, "Clear");
+        place(d->fuji_title, px, py, lw, lh);
+        y = py + lh + S(d, 4);
+        place(d->fuji_note, px, y + (bh - lh) / 2, lw - w - S(d, 12), lh);
+        place(d->fuji_clear, px + lw - w, y, w, bh);
+        y += bh + S(d, 6);
+        place(d->fuji_text, px, y, lw, py + ph - y);
+        place(d->fuji_state_title, px + lw + S(d, 8), py, rw, lh);
+        place(d->fuji_state, px + lw + S(d, 8), py + lh + S(d, 4), rw, ph - lh - S(d, 4));
+    }
 }
 
 /* ---- the window ------------------------------------------------------------------- */
@@ -2600,6 +2697,10 @@ static LRESULT CALLBACK dbg_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             a800debug_sio_clear(d->dbg);
             refresh_sio(d, 1);
             return 0;
+        case IDC_FUJI_CLEAR:
+            a800debug_fujinet_trace_clear(d->dbg);
+            refresh_fujinet(d, 1);
+            return 0;
         case IDCANCEL: hide_window(d); return 0;
         default: break;
         }
@@ -2707,6 +2808,7 @@ void a800_debugger_show(HWND parent, a800session *session)
     d->selected = -1;
     d->mem_mark = -1;
     d->sio_count = -1;
+    d->fuji_count = -1;
     snprintf(d->con_prompt_text, sizeof d->con_prompt_text, "> ");
     g_dbg = d;
 

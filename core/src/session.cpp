@@ -456,6 +456,7 @@ int a800session_start(a800session* s, const a800session_start_opts* opts)
 		return -1;
 	}
 	s->running = 1;
+	session_debug_trace_install(s);
 	if (s->fujinet_wanted) {
 		if (session_fujinet_start(s) == 0 && !session_fujinet_wait_link(s, 4000))
 			im->Notice("FujiNet has not connected yet");

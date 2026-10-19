@@ -9,19 +9,21 @@
  * Cursor; click its left edge, or double-click it, for its breakpoint),
  * ANTIC and its display list, GTIA (players, missiles, colours, collisions
  * and the palette), POKEY & PIA, the memory map and cartridge, breakpoints
- * & watchpoints, and the SIO command trace. A toolbar carries the stepping
- * controls, the header bar the snapshots, symbol loading and file saves;
- * the family's keys apply (F5 run/stop, F7 step, F8 step over, Shift+F8
- * step out, F9 frame, F12 close).
+ * & watchpoints, the SIO command trace, and FujiNet (every NetSIO byte both
+ * ways as SIO packets, from session start, beside NetSIO's state and
+ * POKEY's serial port). A toolbar carries the stepping controls, the header
+ * bar the snapshots, symbol loading and file saves; the family's keys apply
+ * (F5 run/stop, F7 step, F8 step over, Shift+F8 step out, F9 frame, F12
+ * close).
  *
  * Showing this window attaches (which stops the machine, as on every
  * sibling); hiding it detaches and lets the machine run on.
  *
  * The window polls the engine's generation counter on a short timer and
  * refreshes the tab showing only when something changed; while the machine
- * runs it refreshes the status, the registers and the SIO trace twice a
- * second. At each stop the console takes the banner and registers atari800
- * printed, as its own monitor shows them.
+ * runs it refreshes the status, the registers and the SIO and FujiNet
+ * traces twice a second. At each stop the console takes the banner and
+ * registers atari800 printed, as its own monitor shows them.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -38,6 +40,7 @@
 #define MEM_ROWS 256            /* 4K of memory, 16 bytes a row */
 #define HISTORY_MAX 64
 #define SIO_MAX 512
+#define FUJI_MAX 512
 #define BP_MAX 64
 #define CONSOLE_KEEP (256 * 1024)
 #define SNAPSHOTS 4
@@ -48,7 +51,7 @@
 #define PAL_CELL_H 16
 
 enum { TAB_CONSOLE, TAB_CPU, TAB_DISASM, TAB_ANTIC, TAB_GTIA, TAB_POKEY, TAB_MAP,
-       TAB_BREAKS, TAB_SIO, TAB_COUNT };
+       TAB_BREAKS, TAB_SIO, TAB_FUJINET, TAB_COUNT };
 
 /* The tabs, in order: the names A800_DEBUGGER_TAB takes, and their labels
  * (which it takes too). */
@@ -56,6 +59,7 @@ static const struct { const char *name, *label; } k_tabs[TAB_COUNT] = {
     { "console", "Console" }, { "cpu", "CPU & Memory" }, { "disassembly", "Disassembly" },
     { "antic", "ANTIC" }, { "gtia", "GTIA" }, { "pokey", "POKEY & PIA" },
     { "map", "Memory Map" }, { "breakpoints", "Breakpoints" }, { "sio", "SIO" },
+    { "fujinet", "FujiNet" },
 };
 
 static const int k_regs[6] = { A800_REG_PC, A800_REG_SP, A800_REG_A, A800_REG_X,
@@ -148,6 +152,12 @@ typedef struct {
     GtkLabel *sio_note;
     int sio_count;
     a800debug_sio sio_last;
+
+    /* fujinet */
+    GtkTextView *fuji_text, *fuji_state;
+    GtkLabel *fuji_note;
+    int fuji_count;
+    uint64_t fuji_last;
 } DbgWin;
 
 static DbgWin *g_win;
@@ -177,10 +187,11 @@ static gboolean at_end(GtkAdjustment *adj)
            gtk_adjustment_get_upper(adj) - 2.0;
 }
 
-/* Logs (the console, the last instructions, the SIO trace) follow their
- * end while their reader is there. New text grows the view only once it
- * is laid out (or its tab first shows), so the end is pinned whenever the
- * view's height changes; whether to follow is decided as text arrives.
+/* Logs (the console, the last instructions, the SIO and FujiNet traces)
+ * follow their end while their reader is there. New text grows the view
+ * only once it is laid out (or its tab first shows), so the end is pinned
+ * whenever the view's height changes; whether to follow is decided as text
+ * arrives.
  * (GtkTextView moves the value itself while it lays text out, so the
  * value's own changes cannot say whether the reader scrolled away.) */
 static gboolean following(GtkTextView *view)
@@ -1067,6 +1078,41 @@ static void refresh_sio(DbgWin *w, gboolean force)
     g_string_free(t, TRUE);
 }
 
+static void refresh_fujinet(DbgWin *w, gboolean force)
+{
+    static a800_fuji_packet p[FUJI_MAX];
+    static char state[2048];
+    GString *t;
+    int n = a800debug_fujinet_trace(w->dbg, p, FUJI_MAX), i;
+
+    if (!a800session_fujinet_running(w->session))
+        gtk_label_set_text(w->fuji_note, "FujiNet is off (Preferences \xe2\x96\xb8 FujiNet).");
+    else
+        gtk_label_set_text(w->fuji_note, a800session_fujinet_link(w->session)
+            ? "FujiNet is on NetSIO, connected." : "FujiNet is on NetSIO, not connected.");
+    a800debug_fujinet_state(w->dbg, state, sizeof state);
+    set_text(w->fuji_state, state);
+
+    /* a log: set again only when it moved */
+    if (!force && n == w->fuji_count && (n == 0 || p[n - 1].serial == w->fuji_last))
+        return;
+    w->fuji_count = n;
+    w->fuji_last = n > 0 ? p[n - 1].serial : 0;
+    log_note_reader(w->fuji_text);
+    t = g_string_new(NULL);
+    for (i = 0; i < n; i++) {
+        int k;
+        g_string_append_printf(t, "%s%s\n     ", i ? "\n" : "", p[i].text);
+        for (k = 0; k < p[i].nbytes && k < (int)sizeof p[i].data; k++)
+            g_string_append_printf(t, "%02X ", p[i].data[k]);
+        if (p[i].nbytes > (int)sizeof p[i].data) g_string_append(t, "\xe2\x80\xa6");
+    }
+    if (n == 0)
+        g_string_append(t, "(no SIO packets since the trace was cleared)");
+    set_text_at(w->fuji_text, t->str, force || following(w->fuji_text));
+    g_string_free(t, TRUE);
+}
+
 static void refresh_snapshots(DbgWin *w)
 {
     gboolean fuji = a800session_fujinet_running(w->session) != 0;
@@ -1092,6 +1138,7 @@ static void refresh_page(DbgWin *w, int page)
     case TAB_MAP: refresh_map(w); break;
     case TAB_BREAKS: refresh_bps(w); break;
     case TAB_SIO: refresh_sio(w, FALSE); break;
+    case TAB_FUJINET: refresh_fujinet(w, FALSE); break;
     default: break;
     }
 }
@@ -1162,6 +1209,7 @@ static gboolean tick_refresh(gpointer ud)
         refresh_status(w);
         if (page == TAB_CPU) refresh_cpu(w);
         if (page == TAB_SIO) refresh_sio(w, FALSE);
+        if (page == TAB_FUJINET) refresh_fujinet(w, FALSE);
     }
     return G_SOURCE_CONTINUE;
 }
@@ -1665,6 +1713,14 @@ static void on_sio_clear(GtkButton *b, gpointer ud)
     (void)b;
     a800debug_sio_clear(w->dbg);
     refresh_sio(w, TRUE);
+}
+
+static void on_fuji_clear(GtkButton *b, gpointer ud)
+{
+    DbgWin *w = ud;
+    (void)b;
+    a800debug_fujinet_trace_clear(w->dbg);
+    refresh_fujinet(w, TRUE);
 }
 
 static void on_symbols_chosen(GObject *src, GAsyncResult *res, gpointer ud)
@@ -2216,6 +2272,38 @@ static GtkWidget *build_sio(DbgWin *w)
     return padded(box);
 }
 
+static GtkWidget *build_fujinet(DbgWin *w)
+{
+    GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    GtkWidget *left = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget *right = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *clear = gtk_button_new_with_label("Clear");
+
+    w->fuji_note = GTK_LABEL(hint_label(""));
+    gtk_widget_set_hexpand(GTK_WIDGET(w->fuji_note), TRUE);
+    g_signal_connect(clear, "clicked", G_CALLBACK(on_fuji_clear), w);
+    gtk_box_append(GTK_BOX(row), GTK_WIDGET(w->fuji_note));
+    gtk_box_append(GTK_BOX(row), clear);
+    gtk_box_append(GTK_BOX(left), title_label("SIO packets over NetSIO"));
+    gtk_box_append(GTK_BOX(left), row);
+    gtk_box_append(GTK_BOX(left), mono_view(&w->fuji_text, FALSE));
+    make_log(w->fuji_text);
+
+    gtk_box_append(GTK_BOX(right), title_label("NetSIO and POKEY's serial port"));
+    gtk_box_append(GTK_BOX(right), mono_view(&w->fuji_state, FALSE));
+
+    gtk_paned_set_start_child(GTK_PANED(paned), left);
+    gtk_paned_set_end_child(GTK_PANED(paned), right);
+    gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
+    gtk_paned_set_shrink_end_child(GTK_PANED(paned), FALSE);
+    gtk_paned_set_resize_end_child(GTK_PANED(paned), FALSE);
+    gtk_widget_set_size_request(left, 620, -1);
+    gtk_widget_set_size_request(right, 340, -1);
+    w->fuji_count = -1;
+    return padded(paned);
+}
+
 static void on_destroy(GtkWidget *widget, gpointer ud)
 {
     DbgWin *w = ud;
@@ -2302,6 +2390,7 @@ void a800_debugger_show(GtkWindow *parent, a800session *session)
         pages[TAB_MAP] = padded(mono_view(&w->map_text, FALSE));
         pages[TAB_BREAKS] = build_breaks(w);
         pages[TAB_SIO] = build_sio(w);
+        pages[TAB_FUJINET] = build_fujinet(w);
         for (i = 0; i < TAB_COUNT; i++)
             gtk_notebook_append_page(w->notebook, pages[i], gtk_label_new(k_tabs[i].label));
     }

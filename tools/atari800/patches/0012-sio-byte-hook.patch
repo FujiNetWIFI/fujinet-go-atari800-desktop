@@ -1,0 +1,94 @@
+From fe0655b559b263f0854584747c1efaf30937db0a Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Mon, 19 Oct 2026 08:45:00 -0500
+Subject: [PATCH] SIO_byte_hook: report NetSIO bytes and the command line
+
+---
+ src/sio.c | 24 ++++++++++++++++++++++++
+ src/sio.h |  9 ++++++++-
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/src/sio.c b/src/sio.c
+index 11f6fc1..1a0b8ff 100644
+--- a/src/sio.c
++++ b/src/sio.c
+@@ -1515,9 +1515,26 @@ static UBYTE Command_Frame(void)
+ 	}
+ }
+ 
++void (*SIO_byte_hook)(int event, int byte, int path) = NULL;
++
++#ifdef NETSIO
++static int byte_path(void)
++{
++	return netsio_netstream_active() ? SIO_TRACE_NETSTREAM : SIO_TRACE_NETSIO;
++}
++#endif /* NETSIO */
++
+ /* Enable/disable the command frame */
+ void SIO_SwitchCommandFrame(int onoff)
+ {
++	if (SIO_byte_hook != NULL) {
++		int path = SIO_TRACE_SERIAL;
++#ifdef NETSIO
++		if (netsio_enabled)
++			path = byte_path();
++#endif /* NETSIO */
++		SIO_byte_hook(onoff ? SIO_BYTE_CMD_ON : SIO_BYTE_CMD_OFF, 0, path);
++	}
+ #ifdef NETSIO
+ 	if (netsio_enabled && netsio_netstream_active()) {
+ 		CommandIndex = 0;
+@@ -1610,6 +1627,8 @@ void NetSIO_PutByte(int byte)
+ #ifdef DEBUG2
+ 	Log_print("NetSIO_PutByte_%d: %02x", TransferStatus, byte);
+ #endif
++	if (SIO_byte_hook != NULL)
++		SIO_byte_hook(SIO_BYTE_OUT, byte & 0xff, byte_path());
+ 	switch (TransferStatus) {
+ 	case SIO_CommandFrame:
+ 		/* Transmitting Command Frame bytes */
+@@ -1746,6 +1765,7 @@ void SIO_PutByte(int byte)
+ int NetSIO_GetByte(void)
+ {
+ 	UBYTE b;
++	int got = 0;
+ 
+ 	if(netsio_available() > 0)
+ 	{
+@@ -1756,9 +1776,13 @@ int NetSIO_GetByte(void)
+ #endif
+ 			b = 0xFF;
+ 		}
++		else
++			got = 1;
+ 	}
+ 	else
+ 		b = 0xFF;
++	if (SIO_byte_hook != NULL)
++		SIO_byte_hook(got ? SIO_BYTE_IN : SIO_BYTE_IN_NONE, b, byte_path());
+ 
+ 	switch (TransferStatus) {
+ 	case SIO_StatusRead:
+diff --git a/src/sio.h b/src/sio.h
+index be1a5c8..1e99230 100644
+--- a/src/sio.h
++++ b/src/sio.h
+@@ -36,9 +36,16 @@ void SIO_Handler(void);
+ /* Called with each SIO command frame (device, command, aux1, aux2), from
+    the patched SIOV (SIO_TRACE_PATCH), the emulated serial bus
+    (SIO_TRACE_SERIAL) or NetSIO (SIO_TRACE_NETSIO). */
+-enum { SIO_TRACE_PATCH, SIO_TRACE_SERIAL, SIO_TRACE_NETSIO };
++enum { SIO_TRACE_PATCH, SIO_TRACE_SERIAL, SIO_TRACE_NETSIO, SIO_TRACE_NETSTREAM };
+ extern void (*SIO_trace_hook)(const UBYTE *frame, int path);
+ 
++/* Called with each byte NetSIO carries (OUT to FujiNet; IN from it, or
++   IN_NONE when POKEY read with nothing waiting) and each change of the
++   command line. path: SIO_TRACE_NETSIO, SIO_TRACE_NETSTREAM (raw stream,
++   no command frames) or SIO_TRACE_SERIAL (the command line, no NetSIO). */
++enum { SIO_BYTE_OUT, SIO_BYTE_IN, SIO_BYTE_IN_NONE, SIO_BYTE_CMD_ON, SIO_BYTE_CMD_OFF };
++extern void (*SIO_byte_hook)(int event, int byte, int path);
++
+ UBYTE SIO_ChkSum(const UBYTE *buffer, int length);
+ void SIO_SwitchCommandFrame(int onoff);
+ #ifdef NETSIO

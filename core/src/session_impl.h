@@ -120,6 +120,7 @@ void session_debug_stopped(struct a800session* s);
 void session_debug_pause(struct a800session* s);
 void session_debug_free(struct a800session* s);
 void session_debug_after_frame(void);
+void session_debug_trace_install(struct a800session* s);
 }
 
 #endif
