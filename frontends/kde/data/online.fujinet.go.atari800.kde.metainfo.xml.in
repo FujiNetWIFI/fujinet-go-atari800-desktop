@@ -57,7 +57,15 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-10-18">
+    <release version="@PROJECT_VERSION@" date="2026-10-19">
+      <description>
+        <p>
+          Debugger: a FujiNet tab shows every SIO packet between the Atari
+          and FujiNet over NetSIO, both ways, with hex.
+        </p>
+      </description>
+    </release>
+    <release version="0.1.1" date="2026-10-18">
       <description>
         <p>
           On-screen keys hold for 3 frames, so a quick click is never lost.
