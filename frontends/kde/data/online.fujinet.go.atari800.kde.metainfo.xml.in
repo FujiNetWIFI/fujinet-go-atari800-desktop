@@ -3,7 +3,7 @@
   <id>online.fujinet.go.atari800.kde</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>FujiNet Go Atari 800</name>
+  <name>FujiNet Go Atari 800 (KDE)</name>
   <summary>The Atari 8-bit computers with a built-in FujiNet</summary>
   <description>
     <p>
@@ -33,31 +33,47 @@
     </p>
   </description>
   <launchable type="desktop-id">online.fujinet.go.atari800.kde.desktop</launchable>
+  <icon type="stock">online.fujinet.go.atari800.kde</icon>
+  <!-- Software centres classify from these, not from the .desktop
+       Categories= line; without them the app lands in no section at all. -->
+  <categories>
+    <category>Game</category>
+    <category>Emulator</category>
+  </categories>
   <screenshots>
     <screenshot type="default">
       <caption>FujiNet's CONFIG on the Atari, browsing hosts and drive slots</caption>
-      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari800-desktop/main/data/screenshots/1_running_config.png</image>
+      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari800-desktop/v0.2.1/data/screenshots/kde/1_running_config.png</image>
     </screenshot>
     <screenshot>
       <caption>The debugger: disassembly with the OS's labels</caption>
-      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari800-desktop/main/data/screenshots/2_debugger.png</image>
+      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari800-desktop/v0.2.1/data/screenshots/kde/2_debugger.png</image>
     </screenshot>
     <screenshot>
-      <caption>Preferences</caption>
-      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari800-desktop/main/data/screenshots/3_preferences.png</image>
+      <caption>Preferences, the Machine page</caption>
+      <image>https://raw.githubusercontent.com/FujiNetWIFI/fujinet-go-atari800-desktop/v0.2.1/data/screenshots/kde/3_preferences.png</image>
     </screenshot>
   </screenshots>
   <url type="homepage">https://fujinet.online/</url>
   <url type="bugtracker">https://github.com/FujiNetWIFI/fujinet-go-atari800-desktop/issues</url>
   <developer id="online.fujinet">
-    <name>Thomas Cherryhomes</name>
+    <name>FujiNet</name>
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-10-19">
+    <release version="@PROJECT_VERSION@" date="2026-10-27">
+      <description>
+        <p>
+          The Flatpak builds on the GNOME 51 runtime. The software-centre
+          listing now credits FujiNet as developer, declares the app icon,
+          and shows a full set of screenshots for each frontend.
+        </p>
+      </description>
+    </release>
+    <release version="0.2.0" date="2026-10-19">
       <description>
         <p>
           Debugger: a FujiNet tab shows every SIO packet between the Atari

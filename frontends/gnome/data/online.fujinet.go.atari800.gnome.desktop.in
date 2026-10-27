@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=FujiNet Go Atari 800
+Name=FujiNet Go Atari 800 (GNOME)
 GenericName=Atari 8-bit Computer Emulator
 Comment=The Atari 400, 800, XL and XE computers with a FujiNet
 Exec=fujinet-go-atari800-gnome %f
