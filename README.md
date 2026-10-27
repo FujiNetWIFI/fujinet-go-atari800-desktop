@@ -72,6 +72,11 @@ skips it. atari800 and fujinet-firmware are fetched at their pins
 
 - **Flatpak:** `flatpak-builder --user --install build-flatpak
   build-aux/flatpak/online.fujinet.go.atari800.gnome.yml` (or `.kde.yml`).
+- **Install a released Flatpak:** download `online.fujinet.go.atari800.gnome.flatpak`
+  (or `.kde.flatpak`) from the latest release, then
+  `flatpak install --user ./online.fujinet.go.atari800.gnome.flatpak`. Flatpak
+  offers to add Flathub for the runtime. Bundles don't auto-update; reinstall
+  from each new release.
 - **Windows:** natively in MSYS2 UCRT64, or cross-compiled with
   `cmake/toolchains/mingw-w64.cmake` and run under Wine.
 - **macOS:** built on CI (`.github/workflows/macos.yml`).
