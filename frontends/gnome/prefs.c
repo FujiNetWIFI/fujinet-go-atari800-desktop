@@ -119,6 +119,23 @@ static void on_combo(GObject *row, GParamSpec *ps, gpointer ud)
     changed(st, i);
 }
 
+/* A text row: valid text is stored and marks the change; anything else is
+ * flagged and not stored, so the last good text stays in force. */
+static void on_text(GtkEditable *entry, gpointer ud)
+{
+    PrefsState *st = ud;
+    int i = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(entry), "a800-pref"));
+    const char *text = gtk_editable_get_text(entry);
+    if (st->syncing)
+        return;
+    if (a800session_pref_set_text(st->session, i, text, NULL, 0) != 0) {
+        gtk_widget_add_css_class(GTK_WIDGET(entry), "error");
+        return;
+    }
+    gtk_widget_remove_css_class(GTK_WIDGET(entry), "error");
+    changed(st, i);
+}
+
 typedef struct {
     PrefsState *st;
     int i;
@@ -202,6 +219,16 @@ static GtkWidget *make_row(PrefsState *st, int i)
         row = adw_combo_row_new();
         g_signal_connect(row, "notify::selected", G_CALLBACK(on_combo), st);
         break;
+    case A800_PREF_TEXT: {
+        const char *hold = a800session_pref_placeholder(i);
+        g_autofree char *title = g_strdup_printf(hold ? "%s, e.g. %s" : "%s", p->label, hold);
+        row = adw_entry_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+        gtk_widget_set_tooltip_text(row, p->help);
+        g_signal_connect(row, "changed", G_CALLBACK(on_text), st);
+        g_object_set_data(G_OBJECT(row), "a800-pref", GINT_TO_POINTER(i));
+        return row;
+    }
     default:   /* a file or a folder */
         row = adw_action_row_new();
         adw_action_row_add_suffix(ADW_ACTION_ROW(row),
@@ -277,6 +304,13 @@ static void refresh_rows(PrefsState *st)
             adw_combo_row_set_selected(ADW_COMBO_ROW(row), sel >= 0 ? (guint)sel : 0);
             break;
         }
+        case A800_PREF_TEXT:
+            /* the text is the user's own: filled in once, never rewritten mid-edit */
+            if (!g_object_get_data(G_OBJECT(row), "a800-text-set")) {
+                gtk_editable_set_text(GTK_EDITABLE(row), a800session_pref_get_text(st->session, i));
+                g_object_set_data(G_OBJECT(row), "a800-text-set", GINT_TO_POINTER(1));
+            }
+            break;
         default: {
             const char *v = a800session_get_str(st->session, p->key, "");
             g_autofree char *base = v && *v ? g_path_get_basename(v) : NULL;

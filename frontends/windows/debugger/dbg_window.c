@@ -1191,7 +1191,13 @@ static void refresh_fujinet(debugger *d, int force)
     size_t len = 0;
     int i, follow;
 
-    if (!a800session_fujinet_running(d->session))
+    if (a800session_fujinet_external(d->session)) {
+        char ext[200];
+        snprintf(ext, sizeof ext, "External FujiNet on NetSIO %s, %s.",
+                 a800session_fujinet_endpoint(d->session),
+                 a800session_fujinet_link(d->session) ? "connected" : "not connected");
+        set_label(d->fuji_note, ext);
+    } else if (!a800session_fujinet_running(d->session))
         set_label(d->fuji_note, "FujiNet is off (Settings, FujiNet page).");
     else
         set_label(d->fuji_note, a800session_fujinet_link(d->session) ? "FujiNet is on NetSIO, connected."

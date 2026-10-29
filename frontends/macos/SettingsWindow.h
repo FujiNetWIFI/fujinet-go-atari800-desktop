@@ -11,7 +11,7 @@
 
 #include "a800session.h"
 
-@interface A800SettingsWindow : NSObject <NSWindowDelegate>
+@interface A800SettingsWindow : NSObject <NSWindowDelegate, NSTextFieldDelegate>
 /* onLive runs after each live change (the view follows); onClosed when the
  * window closes, with the a800_apply that applying the rest needed. */
 - (instancetype)initWithSession:(a800session *)session

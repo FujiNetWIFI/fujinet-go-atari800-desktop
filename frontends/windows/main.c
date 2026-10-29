@@ -1118,14 +1118,28 @@ static void command(HWND hwnd, int id)
         break;
 
     case IDM_FUJINET_CONFIG:
+        if (a800session_fujinet_external(g_session)) {
+            message_utf8(hwnd, "FujiNet is external: use its own web UI.", "FujiNet", MB_ICONINFORMATION | MB_OK);
+            break;
+        }
         if (!a800session_fujinet_running(g_session)) {
             message_utf8(hwnd, "FujiNet is off (Settings, FujiNet page).", "FujiNet", MB_ICONINFORMATION | MB_OK);
             break;
         }
         ShellExecuteA(hwnd, "open", a800session_fujinet_webui_url(g_session), NULL, NULL, SW_SHOWNORMAL);
         break;
-    case IDM_FUJINET_LOG: show_fujinet_log(); break;
+    case IDM_FUJINET_LOG:
+        if (a800session_fujinet_external(g_session)) {
+            message_utf8(hwnd, "FujiNet is external: see its own console.", "FujiNet", MB_ICONINFORMATION | MB_OK);
+            break;
+        }
+        show_fujinet_log();
+        break;
     case IDM_FUJINET_RESTART:
+        if (a800session_fujinet_external(g_session)) {
+            message_utf8(hwnd, "FujiNet is external: restart it where it runs.", "FujiNet", MB_ICONINFORMATION | MB_OK);
+            break;
+        }
         if (a800session_fujinet_restart(g_session) != 0)
             message_utf8(hwnd, a800session_last_error(g_session), "Cannot Restart FujiNet", MB_ICONWARNING | MB_OK);
         else

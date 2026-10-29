@@ -27,6 +27,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
@@ -118,6 +119,15 @@ void refresh(State &st)
             combo->setCurrentIndex(qMax(0, a800session_pref_get_choice(st.session, r.pref)));
             break;
         }
+        case A800_PREF_TEXT: {
+            /* the user's own text: filled in once, never rewritten mid-edit */
+            auto *edit = static_cast<QLineEdit *>(r.widget);
+            if (!edit->property("a800-text-set").toBool()) {
+                edit->setText(QString::fromUtf8(a800session_pref_get_text(st.session, r.pref)));
+                edit->setProperty("a800-text-set", true);
+            }
+            break;
+        }
         default: {
             const QString v = QString::fromUtf8(a800session_get_str(st.session, p->key, ""));
             r.path->setText(v.isEmpty() ? QStringLiteral("None") : QFileInfo(v).fileName());
@@ -176,6 +186,29 @@ QWidget *makeEditor(State &st, int i, QLabel **pathOut)
             (void)combo;
         });
         return combo;
+    }
+    case A800_PREF_TEXT: {
+        /* valid text is stored; anything else is flagged and not stored, so the last
+         * good text stays in force */
+        auto *edit = new QLineEdit;
+        const char *hold = a800session_pref_placeholder(i);
+        if (hold)
+            edit->setPlaceholderText(QString::fromUtf8(hold));
+        QObject::connect(edit, &QLineEdit::textChanged, edit, [&st, i, edit](const QString &text) {
+            if (st.syncing)
+                return;
+            char err[200];
+            if (a800session_pref_set_text(st.session, i, text.trimmed().toUtf8().constData(), err,
+                                          sizeof err) != 0) {
+                edit->setStyleSheet(QStringLiteral("QLineEdit { border: 1px solid #c01c28; }"));
+                edit->setToolTip(QString::fromUtf8(err));
+                return;
+            }
+            edit->setStyleSheet(QString());
+            edit->setToolTip(QString::fromUtf8(a800session_pref(i)->help));
+            changed(st, i);
+        });
+        return edit;
     }
     default: {
         auto *box = new QWidget;
@@ -335,6 +368,13 @@ int SettingsDialog::run(QWidget *parent, a800session *session, const std::functi
     refresh(st);
     dlg.exec();
 
+    for (const Row &r : st.rows)
+        if (a800session_pref(r.pref)->type == A800_PREF_TEXT &&
+            static_cast<QLineEdit *>(r.widget)->styleSheet().size())
+            QMessageBox::warning(parent, QStringLiteral("Not saved"),
+                                 QStringLiteral("\"%1\" is not valid; the previous %2 stays.")
+                                     .arg(static_cast<QLineEdit *>(r.widget)->text(),
+                                          QString::fromUtf8(a800session_pref(r.pref)->label)));
     a800session_settings_flush(session);
     return st.pending > A800_APPLY_LIVE ? a800session_apply_settings(session) : 0;
 }

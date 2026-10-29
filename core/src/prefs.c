@@ -192,6 +192,7 @@ static const char *const ch_xep80_port[] = {"Port 1", "Port 2", NULL};
 #define P_INT(k, pg, gr, lb, hp, d, mn, mx, st, ap) {k, pg, gr, lb, hp, A800_PREF_INT, d, mn, mx, st, ap}
 #define P_FILE(k, pg, gr, lb, hp, ap) {k, pg, gr, lb, hp, A800_PREF_FILE, 0, 0, 0, 0, ap}
 #define P_DIR(k, pg, gr, lb, hp, ap) {k, pg, gr, lb, hp, A800_PREF_DIR, 0, 0, 0, 0, ap}
+#define P_TEXT(k, pg, gr, lb, hp, ap) {k, pg, gr, lb, hp, A800_PREF_TEXT, 0, 0, 0, 0, ap}
 
 static const a800_pref s_prefs[] = {
     /* Machine */
@@ -288,6 +289,13 @@ static const a800_pref s_prefs[] = {
            "The built-in FujiNet, on the Atari's SIO port", 1, A800_APPLY_RESTART),
     P_BOOL("fujinet_power", "FujiNet", "FujiNet", "Restart FujiNet on power cycle",
            "As unplugging both would", 1, A800_APPLY_LIVE),
+    P_BOOL("fujinet_external", "FujiNet", "External FujiNet", "Use external FujiNet",
+           "Skip the built-in FujiNet and wait for another instance to connect",
+           0, A800_APPLY_RESTART),
+    P_TEXT("fujinet_external_addr", "FujiNet", "External FujiNet", "Listen address:port",
+           "Set that instance's NetSIO host and port to this address. 0.0.0.0 accepts "
+           "connections from the network; 127.0.0.1 only from this computer",
+           A800_APPLY_RESTART),
     P_BOOL("enable_audio", "FujiNet", "Host", "Sound output", NULL, 1, A800_APPLY_RESTART),
     P_BOOL("enable_gamepad", "FujiNet", "Host", "Gamepads", NULL, 1, A800_APPLY_RESTART),
 };
@@ -454,9 +462,48 @@ int a800session_pref_enabled(a800session *s, int i)
         return !s_machines[m].xl || a800session_get_int(s, "multijoy", 0);
     if (!strcmp(k, "sio_patch"))
         return !s->fujinet_wanted;
+    if (!strcmp(k, "fujinet_power"))
+        return !a800session_get_int(s, "fujinet_external", 0);
+    if (!strcmp(k, "fujinet_external"))
+        return a800session_get_int(s, "enable_fujinet", 1);
+    if (!strcmp(k, "fujinet_external_addr"))
+        return a800session_get_int(s, "enable_fujinet", 1) &&
+               a800session_get_int(s, "fujinet_external", 0);
     if (!strncmp(k, "ntsc_", 5) && strcmp(k, "ntsc_preset"))
         return a800session_get_int(s, "artifact_ntsc", 0) == 3;
     return 1;
+}
+
+const char *a800session_pref_get_text(a800session *s, int i)
+{
+    if (i < 0 || i >= N_PREFS || s_prefs[i].type != A800_PREF_TEXT)
+        return "";
+    return a800session_get_str(s, s_prefs[i].key, "");
+}
+
+int a800session_pref_set_text(a800session *s, int i, const char *text, char *err, int errsz)
+{
+    if (i < 0 || i >= N_PREFS || s_prefs[i].type != A800_PREF_TEXT || !text)
+        return -1;
+    if (!strcmp(s_prefs[i].key, "fujinet_external_addr")) {
+        char host[64];
+        int port;
+        if (a800session_parse_hostport(text, host, sizeof host, &port) != 0) {
+            if (err && errsz > 0)
+                snprintf(err, (size_t)errsz,
+                         "\"%s\" is not an address:port (example: 0.0.0.0:11514)", text);
+            return -1;
+        }
+    }
+    a800session_set_str(s, s_prefs[i].key, text);
+    return 0;
+}
+
+const char *a800session_pref_placeholder(int i)
+{
+    if (i >= 0 && i < N_PREFS && !strcmp(s_prefs[i].key, "fujinet_external_addr"))
+        return "0.0.0.0:11514";
+    return NULL;
 }
 
 int a800session_pref_choice_enabled(a800session *s, int i, int c)

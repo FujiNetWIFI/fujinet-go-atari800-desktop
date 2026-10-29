@@ -229,6 +229,10 @@ int a800session_import_to_sd(a800session* s, const char* src, char* dest_out, in
 // Copies into the SD folder and mounts in FujiNet's drive slot.
 static int fujinet_mount(a800session* s, int drive, const char* path, int ro, char* msg, int msgsz)
 {
+	if (s->fujinet_external) {
+		set_msg(msg, msgsz, "FujiNet is external: mount disks in its own web UI");
+		return -1;
+	}
 	char dest[A800_PATH_MAX];
 	std::string src = resolve_media(s, path);
 	if (a800session_import_to_sd(s, src.c_str(), dest, sizeof dest) != 0) {
@@ -254,8 +258,10 @@ int a800session_drive_info(a800session* s, int drive, a800_drive_info* out)
 	memset(out, 0, sizeof *out);
 	if (s->fujinet_wanted) {
 		fujinet_drive d[16];
-		int n = fujinet_api_drives(d, 16);
 		out->fujinet = 1;
+		if (s->fujinet_external)
+			return 0;  // its drives are in its own web UI, not ours to ask
+		int n = fujinet_api_drives(d, 16);
 		for (int i = 0; i < n; i++)
 			if (d[i].slot == drive + 1 && d[i].mounted) {
 				snprintf(out->path, sizeof out->path, "%s%s", d[i].host_slot == 0 ? "SD:" : "",
@@ -298,7 +304,7 @@ int a800session_drive_eject(a800session* s, int drive)
 	if (drive < 0 || drive >= A800_DRIVES)
 		return -1;
 	if (s->fujinet_wanted)
-		return fujinet_api_eject(drive + 1);
+		return s->fujinet_external ? -1 : fujinet_api_eject(drive + 1);
 	im->host.Call([drive] { SIO_Dismount(drive + 1); });
 	std::lock_guard<std::mutex> lock(im->mediaMtx);
 	im->drive[drive].clear();
@@ -626,7 +632,7 @@ int a800session_open(a800session* s, const char* path, char* msg, int msgsz)
 // With FujiNet on: eject what Open put in D1 and come back to CONFIG.
 int a800session_reboot_to_config(a800session* s)
 {
-	if (s->fujinet_wanted)
+	if (s->fujinet_wanted && !s->fujinet_external)
 		fujinet_api_eject(1);
 	return a800session_power_cycle(s);
 }

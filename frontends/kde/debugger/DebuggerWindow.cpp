@@ -1565,7 +1565,12 @@ void DebuggerWindow::refreshFujinet(bool force)
     static a800_fuji_packet p[FUJI_MAX];
     static char state[2048];
     const int n = a800debug_fujinet_trace(m_dbg, p, FUJI_MAX);
-    if (!a800session_fujinet_running(m_session))
+    if (a800session_fujinet_external(m_session))
+        m_fujiNote->setText(QStringLiteral("External FujiNet on NetSIO %1, %2.")
+                                .arg(QString::fromUtf8(a800session_fujinet_endpoint(m_session)),
+                                     a800session_fujinet_link(m_session) ? QStringLiteral("connected")
+                                                                         : QStringLiteral("not connected")));
+    else if (!a800session_fujinet_running(m_session))
         m_fujiNote->setText(QStringLiteral("FujiNet is off (Preferences ▸ FujiNet)."));
     else
         m_fujiNote->setText(a800session_fujinet_link(m_session)

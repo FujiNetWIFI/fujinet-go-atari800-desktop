@@ -1800,7 +1800,11 @@ static const char *bpTypeName(int type)
     static a800_fuji_packet p[FUJI_MAX];
     static char state[2048];
     const int n = a800debug_fujinet_trace(_dbg, p, FUJI_MAX);
-    if (!a800session_fujinet_running(_session))
+    if (a800session_fujinet_external(_session))
+        _fujiNote.stringValue = [NSString stringWithFormat:@"External FujiNet on NetSIO %s, %s.",
+                                 a800session_fujinet_endpoint(_session),
+                                 a800session_fujinet_link(_session) ? "connected" : "not connected"];
+    else if (!a800session_fujinet_running(_session))
         _fujiNote.stringValue = @"FujiNet is off (Settings ▸ FujiNet).";
     else
         _fujiNote.stringValue = a800session_fujinet_link(_session) ? @"FujiNet is on NetSIO, connected."

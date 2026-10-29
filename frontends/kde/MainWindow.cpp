@@ -261,14 +261,28 @@ void MainWindow::buildMenus()
 
     QMenu *fuji = menuBar()->addMenu(QStringLiteral("&FujiNet"));
     fuji->addAction(QStringLiteral("&Web UI"), this, [this] {
+        if (a800session_fujinet_external(m_session)) {
+            toast(QStringLiteral("FujiNet is external: use its own web UI"));
+            return;
+        }
         if (!a800session_fujinet_running(m_session)) {
             toast(QStringLiteral("FujiNet is off (Preferences ▸ FujiNet)"));
             return;
         }
         fujinet_config_show(this, m_session);
     });
-    fuji->addAction(QStringLiteral("Console &Log"), this, [this] { fujinet_log_show(this, m_session); });
+    fuji->addAction(QStringLiteral("Console &Log"), this, [this] {
+        if (a800session_fujinet_external(m_session)) {
+            toast(QStringLiteral("FujiNet is external: see its own console"));
+            return;
+        }
+        fujinet_log_show(this, m_session);
+    });
     fuji->addAction(QStringLiteral("&Restart FujiNet"), this, [this] {
+        if (a800session_fujinet_external(m_session)) {
+            toast(QStringLiteral("FujiNet is external: restart it where it runs"));
+            return;
+        }
         if (a800session_fujinet_restart(m_session) != 0)
             QMessageBox::warning(this, QStringLiteral("Cannot Restart FujiNet"),
                                  local(a800session_last_error(m_session)));

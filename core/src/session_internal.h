@@ -58,6 +58,10 @@ struct a800session {
     char webui_url[64];
     int  fujinet_running;
     int  fujinet_wanted;                    /* FujiNet enabled for this run */
+    int  fujinet_external;                  /* ... and it is not ours (wanted stays 1) */
+    unsigned long netsio_ip;                /* the hub's bind address, host order */
+    int  netsio_port;
+    char netsio_endpoint[80];               /* "host:port" for display */
     int  fujinet_disabled;                  /* the caller said no FujiNet ("" lib) */
 
     pthread_mutex_t sysact_mtx;

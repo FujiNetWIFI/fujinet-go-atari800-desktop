@@ -1512,7 +1512,10 @@ int a800debug_fujinet_state(a800debug* d, char* dst, int dstsz)
 
 	// short lines: the pane is narrow
 	std::string t;
-	if (!a800session_fujinet_running(s))
+	if (a800session_fujinet_external(s))
+		t += fmt("NetSIO     external, UDP %s, %s\n", a800session_fujinet_endpoint(s),
+		         a800session_fujinet_link(s) ? "connected" : "not connected");
+	else if (!a800session_fujinet_running(s))
 		t += "NetSIO     off\n";
 	else
 		t += fmt("NetSIO     UDP %d, %s\n", A800SESSION_NETSIO_PORT,

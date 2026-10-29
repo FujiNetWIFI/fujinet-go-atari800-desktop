@@ -1271,6 +1271,10 @@ static void action_fujinet_config(GSimpleAction *a, GVariant *p, gpointer user_d
 {
     A800Window *self = user_data;
     (void)a; (void)p;
+    if (a800session_fujinet_external(self->session)) {
+        a800_window_toast(self, "FujiNet is external: use its own web UI");
+        return;
+    }
     if (!a800session_fujinet_running(self->session)) {
         a800_window_toast(self, "FujiNet is off (Preferences \xe2\x96\xb8 FujiNet)");
         return;
@@ -1282,6 +1286,10 @@ static void action_fujinet_log(GSimpleAction *a, GVariant *p, gpointer user_data
 {
     A800Window *self = user_data;
     (void)a; (void)p;
+    if (a800session_fujinet_external(self->session)) {
+        a800_window_toast(self, "FujiNet is external: see its own console");
+        return;
+    }
     a800_fujilog_show(GTK_WINDOW(self), self->session);
 }
 
@@ -1289,6 +1297,10 @@ static void action_fujinet_restart(GSimpleAction *a, GVariant *p, gpointer user_
 {
     A800Window *self = user_data;
     (void)a; (void)p;
+    if (a800session_fujinet_external(self->session)) {
+        a800_window_toast(self, "FujiNet is external: restart it where it runs");
+        return;
+    }
     if (a800session_fujinet_restart(self->session) != 0)
         show_message(GTK_WIDGET(self), "Cannot Restart FujiNet",
                      a800session_last_error(self->session));
@@ -1525,7 +1537,7 @@ static void rebuild_menu(A800Window *self, gboolean force)
 
     set_enabled(self, "state-save", a800session_states_available(self->session));
     set_enabled(self, "state-load", a800session_states_available(self->session));
-    set_enabled(self, "fujinet-config", fuji);
+    set_enabled(self, "fujinet-config", fuji || a800session_fujinet_external(self->session));
     set_enabled(self, "fujinet-restart", a800session_get_int(self->session, "enable_fujinet", 1));
 
     if (force || strcmp(sig->str, self->menu_sig) != 0) {

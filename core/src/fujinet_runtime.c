@@ -253,7 +253,7 @@ void session_fujinet_power_cycled(struct a800session *s)
 
 int a800session_fujinet_restart(a800session *s)
 {
-    if (!s->fujinet_wanted)
+    if (!s->fujinet_wanted || s->fujinet_external)
         return -1;
     session_fujinet_restart_for_power(s);
     pthread_mutex_lock(&g_mtx);
@@ -293,6 +293,73 @@ void session_fujinet_mix(struct a800session *s, float *stereo, int frames, float
 int a800session_fujinet_running(const a800session *s)
 {
     return s->fujinet_running;
+}
+
+int a800session_fujinet_external(const a800session *s)
+{
+    return s->fujinet_external;
+}
+
+const char *a800session_fujinet_endpoint(const a800session *s)
+{
+    return s->netsio_endpoint[0] ? s->netsio_endpoint : "127.0.0.1:11514";
+}
+
+int a800session_parse_hostport(const char *text, char *host, int hostsz, int *port)
+{
+    char buf[80], *colon, *end;
+    const char *hst = "0.0.0.0";
+    long num = A800SESSION_NETSIO_PORT;
+    size_t len;
+
+    if (!text)
+        text = "";
+    while (*text == ' ' || *text == '\t')
+        text++;
+    len = strlen(text);
+    while (len && (text[len - 1] == ' ' || text[len - 1] == '\t' || text[len - 1] == '\n' ||
+                   text[len - 1] == '\r'))
+        len--;
+    if (len >= sizeof buf)
+        return -1;
+    memcpy(buf, text, len);
+    buf[len] = '\0';
+
+    if (len) {
+        colon = strrchr(buf, ':');
+        if (colon) {
+            *colon = '\0';
+            hst = buf;
+            if (!*hst)
+                return -1;
+            text = colon + 1;
+        }
+        else {
+            text = buf;
+        }
+        if (!*text)
+            return -1;
+        num = strtol(text, &end, 10);
+        if (*end || num < 1 || num > 65535)
+            return -1;
+        if (colon) {
+            /* An IPv4 literal (or "localhost"). */
+            int oct[4], used = 0, idx;
+            if (strcmp(hst, "localhost") != 0) {
+                if (sscanf(hst, "%d.%d.%d.%d%n", &oct[0], &oct[1], &oct[2], &oct[3], &used) != 4 ||
+                    hst[used])
+                    return -1;
+                for (idx = 0; idx < 4; idx++)
+                    if (oct[idx] < 0 || oct[idx] > 255)
+                        return -1;
+            }
+        }
+    }
+    if ((int)strlen(hst) >= hostsz)
+        return -1;
+    memcpy(host, hst, strlen(hst) + 1);
+    *port = (int)num;
+    return 0;
 }
 
 const char *a800session_fujinet_webui_url(const a800session *s)

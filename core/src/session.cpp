@@ -121,6 +121,8 @@ void a800session_free(a800session* s)
 void a800session_default_opts(a800session* s, a800session_start_opts* o)
 {
 	o->enable_fujinet = a800session_get_int(s, "enable_fujinet", 1);
+	o->external_fujinet = a800session_get_int(s, "fujinet_external", 0);
+	o->fujinet_addr = a800session_get_str(s, "fujinet_external_addr", NULL);
 	o->enable_audio = a800session_get_int(s, "enable_audio", 1);
 	o->enable_gamepad = a800session_get_int(s, "enable_gamepad", 1);
 }
@@ -273,12 +275,30 @@ bool SessionImpl::CoreInit(std::string& err)
 	}
 	coreUp = true;
 	if (s->fujinet_wanted) {
-		// the hub is bound before FujiNet starts: FujiNet pings it first
-		netsio_loopback = 1;
-		if (netsio_init(A800SESSION_NETSIO_PORT) != 0) {
-			Notice("FujiNet is off: NetSIO port " + std::to_string(A800SESSION_NETSIO_PORT)
-			       + " is in use (another copy of this app?)");
+		// the hub is bound before FujiNet starts: FujiNet pings it first. NetSIO binds
+		// once per process, so a new address or port closes the old socket first.
+		static bool bound;
+		static int boundLoopback, boundPort;
+		static unsigned long boundIp;
+		const int loopback = s->fujinet_external ? 0 : 1;
+		const int port = s->fujinet_external ? s->netsio_port : A800SESSION_NETSIO_PORT;
+		const unsigned long ip = s->fujinet_external ? s->netsio_ip : 0;
+		if (bound && (boundLoopback != loopback || boundPort != port || boundIp != ip)) {
+			netsio_shutdown();
+			bound = false;
+		}
+		netsio_loopback = loopback;
+		netsio_bind_addr = ip;
+		if (netsio_init((uint16_t)port) != 0) {
+			Notice("FujiNet is off: NetSIO " + std::string(a800session_fujinet_endpoint(s))
+			       + " cannot be bound (in use by another copy of this app?)");
 			s->fujinet_wanted = 0;
+		}
+		else {
+			bound = true;
+			boundLoopback = loopback;
+			boundPort = port;
+			boundIp = ip;
 		}
 	}
 	else {
@@ -446,7 +466,31 @@ int a800session_start(a800session* s, const a800session_start_opts* opts)
 		s->opts = *opts;
 	else
 		a800session_default_opts(s, &s->opts);
-	s->fujinet_wanted = s->opts.enable_fujinet && session_fujinet_available(s);
+	s->fujinet_external = 0;
+	snprintf(s->netsio_endpoint, sizeof s->netsio_endpoint, "127.0.0.1:%d", A800SESSION_NETSIO_PORT);
+	if (s->opts.enable_fujinet && s->opts.external_fujinet) {
+		// another FujiNet instance connects in: the hub listens where it was told
+		char host[64];
+		int port, oct[4] = {0, 0, 0, 0};
+		if (a800session_parse_hostport(s->opts.fujinet_addr, host, sizeof host, &port) != 0) {
+			session_set_error(s, "\"%s\" is not an address:port for the external FujiNet "
+			                  "(example: 0.0.0.0:11514)",
+			                  s->opts.fujinet_addr ? s->opts.fujinet_addr : "");
+			return -1;
+		}
+		if (strcmp(host, "localhost") == 0)
+			snprintf(host, sizeof host, "127.0.0.1");
+		sscanf(host, "%d.%d.%d.%d", &oct[0], &oct[1], &oct[2], &oct[3]);
+		s->netsio_ip = ((unsigned long)oct[0] << 24) | ((unsigned long)oct[1] << 16) |
+		               ((unsigned long)oct[2] << 8) | (unsigned long)oct[3];
+		s->netsio_port = port;
+		snprintf(s->netsio_endpoint, sizeof s->netsio_endpoint, "%s:%d", host, port);
+		s->fujinet_external = 1;
+		s->fujinet_wanted = 1;
+	}
+	else {
+		s->fujinet_wanted = s->opts.enable_fujinet && session_fujinet_available(s);
+	}
 
 	std::string err;
 	// with FujiNet, the Atari stays off until FujiNet is there to boot it
@@ -458,7 +502,15 @@ int a800session_start(a800session* s, const a800session_start_opts* opts)
 	s->running = 1;
 	session_debug_trace_install(s);
 	if (s->fujinet_wanted) {
-		if (session_fujinet_start(s) == 0 && !session_fujinet_wait_link(s, 4000))
+		// An external FujiNet is not ours to start: the Atari waits a moment for it to
+		// dial in (as it does for the built-in one), then powers on either way. One that
+		// comes up later needs a Power Cycle to be booted from.
+		if (s->fujinet_external) {
+			if (!session_fujinet_wait_link(s, 4000))
+				im->Notice("No external FujiNet has connected to " +
+				           std::string(a800session_fujinet_endpoint(s)) + " yet");
+		}
+		else if (session_fujinet_start(s) == 0 && !session_fujinet_wait_link(s, 4000))
 			im->Notice("FujiNet has not connected yet");
 		im->host.Call([im] { im->ColdStart(); });
 		im->host.SetPowered(true);
@@ -480,6 +532,7 @@ void a800session_stop(a800session* s)
 	gamepad_stop(s);
 	session_fujinet_stop(s);
 	im->host.Stop();
+	s->fujinet_external = 0;
 	s->running = 0;
 }
 
@@ -496,7 +549,7 @@ std::string SessionImpl::PrefValue(int i)
 		const char* label = a800session_pref_choice(s, i, a800session_pref_get_choice(s, i));
 		return std::to_string(a800session_pref_get_choice(s, i)) + ":" + (label ? label : "");
 	}
-	if (p->type == A800_PREF_FILE || p->type == A800_PREF_DIR)
+	if (p->type == A800_PREF_FILE || p->type == A800_PREF_DIR || p->type == A800_PREF_TEXT)
 		return a800session_get_str(s, p->key, "");
 	return std::to_string(a800session_get_int(s, p->key, p->def));
 }
@@ -585,7 +638,7 @@ int a800session_power_cycle(a800session* s)
 	SessionImpl* im = Impl(s);
 	if (!s->running)
 		return -1;
-	if (s->fujinet_wanted && a800session_get_int(s, "fujinet_power", 1))
+	if (s->fujinet_wanted && !s->fujinet_external && a800session_get_int(s, "fujinet_power", 1))
 		session_fujinet_restart_for_power(s);
 	im->host.Call([im] { im->ColdStart(); });
 	return 0;
@@ -907,6 +960,8 @@ int a800session_status(a800session* s, char* dst, int dstsz)
 		fn = "FujiNet off";
 	else if (a800session_fujinet_link(s))
 		fn = "FujiNet connected";
+	else if (s->fujinet_external)
+		fn = "FujiNet external, waiting";
 	else if (a800session_fujinet_running(s))
 		fn = "FujiNet starting";
 	else

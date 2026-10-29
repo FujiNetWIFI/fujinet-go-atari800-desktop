@@ -1085,7 +1085,12 @@ static void refresh_fujinet(DbgWin *w, gboolean force)
     GString *t;
     int n = a800debug_fujinet_trace(w->dbg, p, FUJI_MAX), i;
 
-    if (!a800session_fujinet_running(w->session))
+    if (a800session_fujinet_external(w->session)) {
+        g_autofree char *ext = g_strdup_printf("External FujiNet on NetSIO %s, %s.",
+            a800session_fujinet_endpoint(w->session),
+            a800session_fujinet_link(w->session) ? "connected" : "not connected");
+        gtk_label_set_text(w->fuji_note, ext);
+    } else if (!a800session_fujinet_running(w->session))
         gtk_label_set_text(w->fuji_note, "FujiNet is off (Preferences \xe2\x96\xb8 FujiNet).");
     else
         gtk_label_set_text(w->fuji_note, a800session_fujinet_link(w->session)

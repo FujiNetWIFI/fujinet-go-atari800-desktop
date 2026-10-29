@@ -878,6 +878,10 @@ static NSString *str(const char *s)
 - (void)openWebUI:(id)sender
 {
     (void)sender;
+    if (a800session_fujinet_external(_session)) {
+        [self say:@"FujiNet is external: use its own web UI"];
+        return;
+    }
     if (!a800session_fujinet_running(_session)) {
         [self say:@"FujiNet is off (Settings ▸ FujiNet)"];
         return;
@@ -888,6 +892,10 @@ static NSString *str(const char *s)
 - (void)restartFujiNet:(id)sender
 {
     (void)sender;
+    if (a800session_fujinet_external(_session)) {
+        [self say:@"FujiNet is external: restart it where it runs"];
+        return;
+    }
     if (a800session_fujinet_restart(_session) != 0)
         [self alert:@"Cannot Restart FujiNet" text:[self lastError]];
     else
@@ -910,6 +918,10 @@ static NSString *str(const char *s)
 - (void)showFujiNetLog:(id)sender
 {
     (void)sender;
+    if (a800session_fujinet_external(_session)) {
+        [self say:@"FujiNet is external: see its own console"];
+        return;
+    }
     if (!_logWindow) {
         NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 860, 600)];
         scroll.hasVerticalScroller = YES;
@@ -1139,8 +1151,10 @@ static NSString *str(const char *s)
         [item setState:(_session && a800session_80col_display(_session)) ? NSControlStateValueOn : NSControlStateValueOff];
         return _session && a800session_80col_fitted(_session);
     }
-    if (a == @selector(rebootConfig:) || a == @selector(openWebUI:))
+    if (a == @selector(rebootConfig:))
         return _session && a800session_fujinet_running(_session);
+    if (a == @selector(openWebUI:))
+        return _session && (a800session_fujinet_running(_session) || a800session_fujinet_external(_session));
     if (a == @selector(saveState:) || a == @selector(loadState:))
         return running && a800session_states_available(_session);
     if (a == @selector(resetMachine:) || a == @selector(copyScreenText:) || a == @selector(pasteToAtari:) ||

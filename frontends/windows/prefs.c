@@ -35,11 +35,16 @@
 #define ID_ROM_LIST 3001
 #define ID_ROM_IMPORT 3002
 #define ID_ROW 3100             /* + pref * 4 + part */
+#define HELP_H 40               /* a text row's note under it */
+#ifndef EM_SETCUEBANNER
+#define EM_SETCUEBANNER 0x1501
+#endif
 
 typedef struct {
     HWND label, ctrl, name;     /* name: a file row's file name */
-    char labels[2048];          /* a choice row's labels, as shown */
+    char labels[2048];          /* a choice row's labels, as shown; a text row's "filled in" mark */
     int page;
+    int bad;                    /* a text row whose text was refused */
 } Row;
 
 static HWND g_win, g_tabs, g_pages[MAX_PAGES], g_rom_list;
@@ -133,6 +138,13 @@ static void refresh(void)
             SendMessageA(r->ctrl, CB_SETCURSEL, (WPARAM)(sel >= 0 ? sel : 0), 0);
             break;
         }
+        case A800_PREF_TEXT:
+            /* the user's own text: filled in once, never rewritten mid-edit */
+            if (!r->labels[0]) {
+                set_text_utf8(r->ctrl, a800session_pref_get_text(g_s, i));
+                r->labels[0] = 1;
+            }
+            break;
         default: {
             const char *v = a800session_get_str(g_s, p->key, "");
             const char *b = v && *v ? v + strlen(v) : NULL;
@@ -230,7 +242,8 @@ static void show_page(int n)
  * controls' notifications come here. */
 static LRESULT CALLBACK page_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    if (msg == WM_COMMAND || msg == WM_NOTIFY || msg == WM_CTLCOLORSTATIC || msg == WM_CTLCOLORBTN)
+    if (msg == WM_COMMAND || msg == WM_NOTIFY || msg == WM_CTLCOLORSTATIC || msg == WM_CTLCOLORBTN ||
+        msg == WM_CTLCOLOREDIT)
         return SendMessageA(g_win, msg, wp, lp);
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
@@ -243,6 +256,15 @@ static LRESULT CALLBACK prefs_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (n->idFrom == ID_TABS && n->code == TCN_SELCHANGE)
             show_page((int)SendMessageA(g_tabs, TCM_GETCURSEL, 0, 0));
         return 0;
+    }
+    case WM_CTLCOLOREDIT: {
+        int i;
+        for (i = 0; i < a800session_pref_count() && i < MAX_ROWS; i++)
+            if (g_rows[i].bad && g_rows[i].ctrl == (HWND)lp) {
+                SetTextColor((HDC)wp, RGB(192, 28, 40));
+                break;
+            }
+        break;
     }
     case WM_CTLCOLORSTATIC:
     case WM_CTLCOLORBTN:
@@ -295,6 +317,20 @@ static LRESULT CALLBACK prefs_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     }
                     a800session_pref_set_choice(g_s, i, c);
                     changed(i);
+                }
+                break;
+            case A800_PREF_TEXT:
+                if (code == EN_CHANGE) {
+                    /* valid text is stored; anything else is shown in red and not stored,
+                     * so the last good text stays in force */
+                    char text[160], *start = text, *end;
+                    GetWindowTextA(g_rows[i].ctrl, text, sizeof text);
+                    while (*start == ' ' || *start == '\t') start++;
+                    end = start + strlen(start);
+                    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+                    g_rows[i].bad = a800session_pref_set_text(g_s, i, start, NULL, 0) != 0;
+                    InvalidateRect(g_rows[i].ctrl, NULL, TRUE);
+                    if (!g_rows[i].bad) changed(i);
                 }
                 break;
             default:
@@ -441,6 +477,8 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
             last_group = p->group;
         }
         heights[page] += ROW_H;
+        if (p->type == A800_PREF_TEXT && p->help)
+            heights[page] += HELP_H;
     }
     for (i = 0; i <= page; i++)
         if (heights[i] > page_h) page_h = heights[i];
@@ -523,6 +561,19 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
             r->ctrl = child(pg, 0, "COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL,
                             CTRL_X, y, CTRL_W, 300, id, g_font);
             SendMessageA(r->ctrl, CB_SETDROPPEDWIDTH, 360, 0);
+            break;
+        case A800_PREF_TEXT:
+            r->ctrl = child(pg, WS_EX_CLIENTEDGE, "EDIT", "", ES_AUTOHSCROLL | WS_TABSTOP, CTRL_X, y + 1,
+                            CTRL_W, 24, id, g_font);
+            if (a800session_pref_placeholder(i)) {
+                wchar_t hold[64];
+                MultiByteToWideChar(CP_UTF8, 0, a800session_pref_placeholder(i), -1, hold, 64);
+                SendMessageW(r->ctrl, EM_SETCUEBANNER, FALSE, (LPARAM)hold);
+            }
+            if (p->help) {
+                child(pg, 0, "STATIC", p->help, 0, 24, y + ROW_H - 4, PAGE_W - 48, HELP_H - 6, 0, g_font);
+                y += HELP_H;
+            }
             break;
         default:
             r->name = child(pg, 0, "STATIC", "", SS_PATHELLIPSIS, CTRL_X, y + 4, CTRL_W - 160, 20, 0, g_font);

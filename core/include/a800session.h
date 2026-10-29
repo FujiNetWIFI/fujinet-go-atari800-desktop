@@ -75,7 +75,7 @@ int a800_machine_is_xl(int m);                  /* XL/XE OS, two ports */
  * a800session_apply_settings. */
 typedef enum {
     A800_PREF_BOOL = 0, A800_PREF_CHOICE, A800_PREF_INT, A800_PREF_FILE,
-    A800_PREF_DIR
+    A800_PREF_DIR, A800_PREF_TEXT
 } a800_pref_type;
 
 /* When a change takes effect. */
@@ -110,6 +110,14 @@ void a800session_pref_set_choice(a800session *s, int i, int c);
 /* 0 = shown greyed (not imported, not available on this machine, ...). */
 int a800session_pref_enabled(a800session *s, int i);
 int a800session_pref_choice_enabled(a800session *s, int i, int c);
+/* TEXT prefs: the current text ("" if never set) and a validated set. A text
+ * the pref does not accept is refused (-1, nothing stored, the reason in err
+ * when given); 0 stores it. */
+const char *a800session_pref_get_text(a800session *s, int i);
+int  a800session_pref_set_text(a800session *s, int i, const char *text,
+                               char *err, int errsz);
+/* What a TEXT pref shows while empty (its default), or NULL. */
+const char *a800session_pref_placeholder(int i);
 
 /* Applies every changed setting; returns the highest a800_apply it needed. */
 int a800session_apply_settings(a800session *s);
@@ -119,6 +127,10 @@ typedef struct {
     int enable_fujinet;     /* start the in-process FujiNet runtime */
     int enable_audio;       /* open the SDL audio device */
     int enable_gamepad;     /* start the SDL gamepad thread */
+    int external_fujinet;   /* 1: don't start it; the NetSIO hub listens on
+                             * fujinet_addr for another FujiNet instance */
+    const char *fujinet_addr; /* "host:port" or "port" the hub binds (external
+                               * only); NULL/"" = 0.0.0.0:11514 */
 } a800session_start_opts;
 
 void a800session_default_opts(a800session *s, a800session_start_opts *opts);
@@ -393,7 +405,19 @@ int a800session_rom_import(a800session *s, const char *path, int slot,
                            char *msg, int msgsz);
 
 /* ---- FujiNet ------------------------------------------------------------------- */
+/* Parses the "Use external FujiNet" address field: "host:port" (host an IPv4
+ * literal or "localhost") or a bare "port". Empty text means the default,
+ * 0.0.0.0:11514. Returns 0 and fills host/port, or -1 when the text is not an
+ * address:port (nothing is written then). */
+int         a800session_parse_hostport(const char *text, char *host, int hostsz,
+                                       int *port);
 int         a800session_fujinet_running(const a800session *s);
+/* 1 when the session was started to wait for an external FujiNet (no runtime
+ * of ours; fujinet_running stays 0). */
+int         a800session_fujinet_external(const a800session *s);
+/* "host:port" the NetSIO hub listens on (the running session's, or the
+ * built-in FujiNet's 127.0.0.1:11514 before the first start). */
+const char *a800session_fujinet_endpoint(const a800session *s);
 int         a800session_fujinet_link(a800session *s);   /* NetSIO connected */
 const char *a800session_fujinet_webui_url(const a800session *s);
 int         a800session_fujinet_copy_log(a800session *s, char *dst, int max);

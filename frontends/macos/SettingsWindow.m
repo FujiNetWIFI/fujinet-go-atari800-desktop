@@ -124,6 +124,30 @@ static NSString *str(const char *s)
     [self changed:i];
 }
 
+/* A text row: valid text is stored and marks the change; anything else is
+ * shown in red and not stored, so the last good text stays in force. */
+- (void)textChanged:(NSTextField *)f
+{
+    if (_syncing) return;
+    const int i = (int)[f tag];
+    NSString *text = [[f stringValue]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    char err[200];
+    if (a800session_pref_set_text(_session, i, [text UTF8String], err, sizeof err) != 0) {
+        [f setTextColor:[NSColor systemRedColor]];
+        [f setToolTip:str(err)];
+        return;
+    }
+    [f setTextColor:[NSColor controlTextColor]];
+    [f setToolTip:str(a800session_pref(i)->help)];
+    [self changed:i];
+}
+
+- (void)controlTextDidChange:(NSNotification *)note
+{
+    if ([[note object] isKindOfClass:[NSTextField class]]) [self textChanged:[note object]];
+}
+
 - (void)choosePath:(NSButton *)b
 {
     const int i = (int)[b tag];
@@ -221,6 +245,14 @@ static NSString *str(const char *s)
             [pop selectItemAtIndex:sel >= 0 && sel < [pop numberOfItems] ? sel : 0];
             break;
         }
+        case A800_PREF_TEXT: {
+            /* the user's own text: filled in once, never rewritten mid-edit */
+            if (![[ctrl identifier] isEqualToString:@"a800-text-set"]) {
+                [(NSTextField *)ctrl setStringValue:str(a800session_pref_get_text(_session, i))];
+                [ctrl setIdentifier:@"a800-text-set"];
+            }
+            break;
+        }
         default: {
             NSString *v = str(a800session_get_str(_session, p->key, ""));
             NSTextField *name = _paths[key];
@@ -294,6 +326,17 @@ static NSString *str(const char *s)
             [pop setTarget:self];
             [pop setAction:@selector(choiceChanged:)];
             ctrl = pop;
+            break;
+        }
+        case A800_PREF_TEXT: {
+            NSTextField *f = [NSTextField textFieldWithString:@""];
+            [f setFrame:NSMakeRect(CTRL_X, y + 3, PAGE_W - CTRL_X - 16, 22)];
+            [f setPlaceholderString:str(a800session_pref_placeholder(i))];
+            [f setToolTip:str(p->help)];
+            [f setDelegate:self];
+            [f setTarget:self];
+            [f setAction:@selector(textChanged:)];
+            ctrl = f;
             break;
         }
         default: {

@@ -1,0 +1,121 @@
+From 3a1f8c6d2e4b7095a1c3d5e7f9b1d3f5a7c9e1b3 Mon Sep 17 00:00:00 2001
+From: Thomas Cherryhomes <thom.cherryhomes@gmail.com>
+Date: Thu, 29 Oct 2026 12:00:00 -0500
+Subject: [PATCH] NetSIO: netsio_bind_addr, and a shutdown that rebinds
+
+With netsio_loopback off the hub listened on every interface. An external
+FujiNet on one network card needs a chosen address: set netsio_bind_addr
+(host byte order, 0 = every interface) before netsio_init.
+
+Binding a different address or port means netsio_shutdown, then init. The
+POSIX receiver thread never left its recvfrom loop after the socket was
+closed (it spun on EBADF, and would have shared the next socket), so it
+now polls with a timeout and exits when shutdown bumps its generation.
+---
+ src/netsio.c    | 28 ++++++++++++++++++++++++++--
+ src/netsio.h    |  3 +++
+ src/netsiowin.c |  5 +++--
+ 3 files changed, 32 insertions(+), 4 deletions(-)
+
+--- a/src/netsio.c
++++ b/src/netsio.c
+@@ -18,6 +18,7 @@
+ #include <sys/ioctl.h>
+ #include <netinet/in.h>
+ #include <fcntl.h>
++#include <poll.h>
+ #include <time.h>
+ #include "netsio.h"
+ #include "log.h"
+@@ -32,8 +33,11 @@
+ /* Flag to know when netsio is enabled */
+ volatile int netsio_enabled = 0;
+ int netsio_loopback = 0;
++unsigned long netsio_bind_addr = 0;
+ /* Flag to track if NetSIO has been initialized (prevents re-initialization) */
+ static int netsio_initialized = 0;
++/* Bumped by netsio_shutdown: the receiver thread of an older socket exits */
++static volatile unsigned netsio_rx_generation = 0;
+ /* Holds sync to fujinet-pc incremented number */
+ uint8_t netsio_sync_num = 0;
+ /* if we have heard from fujinet-pc or not */
+@@ -275,7 +279,7 @@
+     
+     addr.sin_family = AF_INET;
+     addr.sin_port = htons(port);
+-    addr.sin_addr.s_addr = htonl(netsio_loopback ? INADDR_LOOPBACK : INADDR_ANY);
++    addr.sin_addr.s_addr = htonl(netsio_loopback ? INADDR_LOOPBACK : (uint32_t)netsio_bind_addr);
+     
+     /* 
+      * Enable broadcast on the socket - required on all platforms
+@@ -319,7 +323,7 @@
+     }
+ 
+     /* spawn receiver thread */
+-    if (pthread_create(&rx_thread, NULL, fujinet_rx_thread, NULL) != 0)
++    if (pthread_create(&rx_thread, NULL, fujinet_rx_thread, (void *)(uintptr_t)netsio_rx_generation) != 0)
+     {
+ #ifdef DEBUG
+         Log_print("netsio: pthread_create rx");
+@@ -617,9 +621,20 @@
+     uint8_t buf[4096];
+     uint8_t cmd;
+     ssize_t n;
++    const unsigned generation = (unsigned)(uintptr_t)arg;
+ 
+     for (;;)
+     {
++        /* Wake up now and then to see whether netsio_shutdown closed our socket */
++        struct pollfd pfd;
++        pfd.fd = sockfd;
++        pfd.events = POLLIN;
++        pfd.revents = 0;
++        if (generation != netsio_rx_generation)
++            return NULL;
++        if (poll(&pfd, 1, 200) <= 0 || generation != netsio_rx_generation)
++            continue;
++
+         /* 
+          * Always initialize with full sockaddr_storage size for receiving
+          * This works on both Linux and macOS - we need full size for first connect
+@@ -902,7 +917,8 @@
+ #endif
+     }
+ 
+-    /* Close UDP socket - this will cause fujinet_rx_thread's recvfrom() to fail and exit */
++    /* Close UDP socket - the receiver thread sees the new generation and exits */
++    netsio_rx_generation++;
+     if (sockfd >= 0) {
+ #ifdef DEBUG
+         Log_print("netsio: closing socket %d", sockfd);
+--- a/src/netsio.h
++++ b/src/netsio.h
+@@ -6,6 +6,9 @@
+ /* Set before netsio_init: listen on 127.0.0.1 only, and refuse a port
+    another process already holds (no SO_REUSEADDR/SO_REUSEPORT). */
+ extern int netsio_loopback;
++/* Set before netsio_init, with netsio_loopback off: the IPv4 address (host
++   byte order) to listen on. 0 is every interface. */
++extern unsigned long netsio_bind_addr;
+ 
+ #include <stdint.h>
+ #include <stddef.h>
+--- a/src/netsiowin.c
++++ b/src/netsiowin.c
+@@ -18,6 +18,7 @@
+ /* State variables (same as netsio.c) */
+ volatile int netsio_enabled = 0;
+ int netsio_loopback = 0;
++unsigned long netsio_bind_addr = 0;
+ 
+ /* PIA pin states, buffered for the emulation thread */
+ static volatile int netsio_ca1_state = 1;
+@@ -261,7 +262,7 @@
+     memset(&addr, 0, sizeof(addr));
+     addr.sin_family = AF_INET;
+     addr.sin_port = htons(port);
+-    addr.sin_addr.s_addr = htonl(netsio_loopback ? INADDR_LOOPBACK : INADDR_ANY);
++    addr.sin_addr.s_addr = htonl(netsio_loopback ? INADDR_LOOPBACK : (uint32_t)netsio_bind_addr);
+ 
+     setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (const char *)&broadcast, sizeof(broadcast));
+     if (netsio_loopback)
