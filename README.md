@@ -58,6 +58,10 @@ SIO command, and FujiNet: every NetSIO byte both ways as SIO packets (frame,
 ACK, COMPLETE, data and checksums, with hex), recorded from start-up. A CIM
 stops into it.
 
+## External FujiNet
+
+A switch in Preferences (Windows Apple II: `FujiNet ▸ Connection`) skips the built-in FujiNet and listens on an address:port you enter, e.g. `0.0.0.0:11514`; point the other FujiNet instance at it.
+
 ## Building
 
     cmake -B build -G Ninja
