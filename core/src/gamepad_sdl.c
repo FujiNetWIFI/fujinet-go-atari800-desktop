@@ -520,7 +520,10 @@ static void *thread_main(void *arg)
             }
         }
         poll_sticks(g);
-        SDL_Delay(16);   /* ~60 Hz, the machine's own sampling rate */
+        /* ~60 Hz, the machine's own sampling rate, with a pad; with none only
+         * hot-plug events are waited for. Not SDL_WaitEventTimeout: SDL polls
+         * at 1 kHz inside it. */
+        SDL_Delay(g->npads > 0 ? 16 : 100);
     }
 
     pthread_mutex_lock(&g->lock);
