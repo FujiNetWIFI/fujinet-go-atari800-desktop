@@ -64,7 +64,14 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-10-31">
+    <release version="@PROJECT_VERSION@" date="2026-11-01">
+      <description>
+        <p>
+          Lower CPU use: the picture is drawn on the GPU (with a software fallback) only when the emulator has a new frame, and the display stops updating while the window is hidden. Needs Qt 6.7 or newer.
+        </p>
+      </description>
+    </release>
+    <release version="0.3.1" date="2026-10-31">
       <description>
         <p>
           Fixed: the FujiNet Console Log no longer jumps back to the top every second, so it can be scrolled and read while it updates. It follows new output only while you are at the bottom.
