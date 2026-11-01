@@ -131,8 +131,8 @@ modules:
         dest: third_party/atari800
       # Pinned exactly as cmake/Dependencies.cmake (FUJINET_COMMIT).
       - type: git
-        url: https://github.com/FujiNetWIFI/fujinet-firmware
-        commit: f703133d00f5adddb6365895a5f1e9df7c2505bd
+        url: https://github.com/tschak909/fujinet-firmware
+        commit: 0c9f00c16dff62d2b3c6b08821322f50642594db
         dest: third_party/fujinet-firmware
       # Same reasoning: the sandboxed build step has no network access, but
       # tools/fujinet/build-fujinet-desktop.sh needs mbedTLS 3.x and
