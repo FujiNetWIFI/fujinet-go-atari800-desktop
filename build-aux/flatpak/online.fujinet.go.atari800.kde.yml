@@ -58,7 +58,7 @@ modules:
   # extensions need a build backend pip can't reach offline (jinja2's own
   # backend, flit_core, isn't present either), and a wheel needs none --
   # pip just unpacks it. Pinned to org.kde.Sdk 6.11's python3 (3.13,
-  # confirmed from the sandbox's own traceback) x86_64 manylinux wheels;
+  # confirmed from the sandbox's own traceback) x86_64 and aarch64 manylinux wheels (one per arch, only-arches);
   # installed to a fixed, python-version-independent path so the
   # fujinet-go-atari800 module below can just PYTHONPATH at it.
   - name: python3-fujinet-webui-deps
@@ -68,11 +68,21 @@ modules:
         --target=/app/fujinet-pyshims PyYAML==6.0.3 MarkupSafe==3.0.3 Jinja2==3.1.6
     sources:
       - type: file
+        only-arches: [x86_64]
         url: https://files.pythonhosted.org/packages/74/27/e5b8f34d02d9995b80abcef563ea1f8b56d20134d8f4e5e81733b1feceb2/pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
         sha256: 0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6
       - type: file
+        only-arches: [aarch64]
+        url: https://files.pythonhosted.org/packages/50/31/b20f376d3f810b9b2371e72ef5adb33879b25edb7a6d072cb7ca0c486398/pyyaml-6.0.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+        sha256: ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c
+      - type: file
+        only-arches: [x86_64]
         url: https://files.pythonhosted.org/packages/a9/21/9b05698b46f218fc0e118e1f8168395c65c8a2c750ae2bab54fc4bd4e0e8/markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
         sha256: ccfcd093f13f0f0b7fdd0f198b90053bf7b2f02a3927a30e63f3ccc9df56b676
+      - type: file
+        only-arches: [aarch64]
+        url: https://files.pythonhosted.org/packages/00/07/575a68c754943058c78f30db02ee03a64b3c638586fba6a6dd56830b30a3/markupsafe-3.0.3-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+        sha256: 133a43e73a802c5562be9bbcd03d090aa5a1fe899db609c29e8c8d815c5f6de6
       - type: file
         url: https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl
         sha256: 85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
@@ -122,7 +132,7 @@ modules:
       # Pinned exactly as cmake/Dependencies.cmake (FUJINET_COMMIT).
       - type: git
         url: https://github.com/FujiNetWIFI/fujinet-firmware
-        commit: 5674a013514e6370c0100f5f6295aa2069218ff3
+        commit: f703133d00f5adddb6365895a5f1e9df7c2505bd
         dest: third_party/fujinet-firmware
       # Same reasoning: the sandboxed build step has no network access, but
       # tools/fujinet/build-fujinet-desktop.sh needs mbedTLS 3.x and

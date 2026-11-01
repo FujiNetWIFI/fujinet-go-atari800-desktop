@@ -18,7 +18,7 @@ find_package(Git QUIET)
 set(ATARI800_COMMIT "b49865e63f5675c798d0122a5ff65c89b2f2748b")
 set(ATARI800_URL "https://github.com/atari800/atari800")
 
-set(FUJINET_COMMIT "5674a013514e6370c0100f5f6295aa2069218ff3")
+set(FUJINET_COMMIT "f703133d00f5adddb6365895a5f1e9df7c2505bd")
 set(FUJINET_URL "https://github.com/FujiNetWIFI/fujinet-firmware")
 
 # a800_provide_dependency(NAME <n> PATH <p> SENTINEL <file> OVERRIDE <VAR>

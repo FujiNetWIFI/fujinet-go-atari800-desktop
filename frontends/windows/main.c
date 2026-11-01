@@ -694,21 +694,30 @@ static HWND g_log_edit;
 static void log_refresh(void)
 {
     static char buf[128 * 1024];
-    int n, at_end;
+    static char shown[128 * 1024];
+    const char *text;
+    int n, at_end, first;
     SCROLLINFO si;
     if (!g_log_edit) return;
+    n = a800session_fujinet_copy_log(g_session, buf, sizeof buf);
+    text = n > 0 ? buf : "(no FujiNet output yet)";
+    /* unchanged: leave the reader where they are */
+    if (!strcmp(text, shown)) return;
     memset(&si, 0, sizeof si);
     si.cbSize = sizeof si;
     si.fMask = SIF_ALL;
     GetScrollInfo(g_log_edit, SB_VERT, &si);
     at_end = si.nPos + (int)si.nPage >= si.nMax;
-    n = a800session_fujinet_copy_log(g_session, buf, sizeof buf);
-    SetWindowTextA(g_log_edit, n > 0 ? buf : "(no FujiNet output yet)");
-    /* follow the tail only while the reader is at the bottom */
+    first = (int)SendMessageA(g_log_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+    SetWindowTextA(g_log_edit, text);
+    snprintf(shown, sizeof shown, "%s", text);
     if (at_end) {
+        /* follow the tail only while the reader is at the bottom */
         int len = GetWindowTextLengthA(g_log_edit);
         SendMessageA(g_log_edit, EM_SETSEL, (WPARAM)len, (LPARAM)len);
         SendMessageA(g_log_edit, EM_SCROLLCARET, 0, 0);
+    } else if (first > 0) {
+        SendMessageA(g_log_edit, EM_LINESCROLL, 0, (LPARAM)first);
     }
 }
 

@@ -59,12 +59,14 @@ void fujinet_log_show(QWidget *parent, a800session *session)
     auto refresh = [view, session]() {
         static char buf[128 * 1024];
         const int n = a800session_fujinet_copy_log(session, buf, sizeof(buf));
-        const bool atEnd = view->verticalScrollBar()->value() ==
-                           view->verticalScrollBar()->maximum();
-        view->setPlainText(n > 0 ? QString::fromUtf8(buf)
-                                 : QStringLiteral("(no FujiNet output yet)"));
-        if (atEnd)
-            view->verticalScrollBar()->setValue(view->verticalScrollBar()->maximum());
+        const QString text = n > 0 ? QString::fromUtf8(buf) : QStringLiteral("(no FujiNet output yet)");
+        if (text == view->toPlainText())
+            return;  // unchanged: leave the reader where they are
+        QScrollBar *bar = view->verticalScrollBar();
+        const int value = bar->value();
+        const bool atEnd = value >= bar->maximum() - 2;
+        view->setPlainText(text);
+        bar->setValue(atEnd ? bar->maximum() : value);
     };
     QObject::connect(timer, &QTimer::timeout, view, refresh);
     timer->start(1000);

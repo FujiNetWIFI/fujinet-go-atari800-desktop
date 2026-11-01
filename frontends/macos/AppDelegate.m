@@ -908,11 +908,19 @@ static NSString *str(const char *s)
     static char buf[128 * 1024];
     const int n = a800session_fujinet_copy_log(_session, buf, sizeof buf);
     NSScrollView *scroll = (NSScrollView *)_logView.enclosingScrollView;
+    NSString *text = (n > 0 ? [NSString stringWithUTF8String:buf] : nil) ?: @"(no FujiNet output yet)";
+    /* unchanged: leave the reader where they are */
+    if ([text isEqualToString:_logView.string]) return;
     const BOOL atEnd = !scroll || (NSMaxY(scroll.contentView.documentVisibleRect) >=
                                    NSMaxY(((NSView *)scroll.documentView).frame) - 4.0);
-    NSString *text = n > 0 ? [NSString stringWithUTF8String:buf] : nil;
-    [_logView setString:(text ?: @"(no FujiNet output yet)")];
-    if (atEnd) [_logView scrollRangeToVisible:NSMakeRange(_logView.string.length, 0)];
+    const NSPoint where = scroll ? scroll.contentView.bounds.origin : NSZeroPoint;
+    [_logView setString:text];
+    if (atEnd) {
+        [_logView scrollRangeToVisible:NSMakeRange(_logView.string.length, 0)];
+    } else if (scroll) {
+        [scroll.contentView scrollToPoint:where];
+        [scroll reflectScrolledClipView:scroll.contentView];
+    }
 }
 
 - (void)showFujiNetLog:(id)sender
