@@ -8,10 +8,12 @@
 
 option(WITH_FUJINET "Build and bundle the FujiNet runtime" ON)
 
-# Local builds follow upstream; CI, flatpak and release builds use the pin.
+# Local builds follow upstream; CI, flatpak and release builds use the pin. A pin on a
+# fork (a PR under test) is never moved: "newest" there is the fork's master, not the PR.
 set(_fn_auto_default ON)
 if(DEFINED ENV{CI} OR DEFINED ENV{FLATPAK_ID} OR DEFINED ENV{FLATPAK_BUILDER_BUILDDIR}
-   OR FUJINET_SRC OR DEFINED ENV{FUJINET_SRC})
+   OR FUJINET_SRC OR DEFINED ENV{FUJINET_SRC}
+   OR NOT FUJINET_URL STREQUAL "https://github.com/FujiNetWIFI/fujinet-firmware")
   set(_fn_auto_default OFF)
 endif()
 option(FUJINET_AUTO_UPDATE "Move the FujiNet pin to fujinet-firmware's newest commit when building"
