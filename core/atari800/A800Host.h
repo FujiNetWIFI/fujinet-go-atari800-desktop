@@ -81,6 +81,12 @@ public:
 	void NotifyVsync(int64_t frameTimeNs);
 	double Fps() const;                // the running TV system's
 	void ClearFrame();                 // black, e.g. while powered off
+	// cb(ctx) runs on the thread that publishes a frame, after it is stored
+	// (a frame identical to the previous one is not published again). NULL
+	// stops the calls and returns once one in flight has finished.
+	void SetFrameCallback(void (*cb)(void*), void* ctx);
+	// Frames the machine has run, published or not.
+	uint64_t FrameCount() const { return _frameCount.load(); }
 
 	// ---- audio
 	void FillAudio(float* stereo, uint32_t frames);
@@ -116,6 +122,7 @@ private:
 	void RunJobs(bool parked);
 	void Pace();
 	void PublishFrame();
+	void CallFrameCb();
 	void DrainLog();
 
 	Callbacks _cb;
@@ -143,6 +150,11 @@ private:
 	std::vector<uint32_t> _render;
 	int _frameW = 336, _frameH = 240, _framePar = 1000;
 	uint64_t _frameSerial = 0;
+	bool _frameValid = false;          // _frame holds a published frame
+	std::atomic<uint64_t> _frameCount { 0 };
+	std::mutex _cbLock;                // held across _frameCb calls
+	void (*_frameCb)(void*) = nullptr;
+	void* _frameCbCtx = nullptr;
 
 	// pacing
 	std::mutex _vsyncLock;

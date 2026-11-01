@@ -1,5 +1,12 @@
 /*
- * The Atari's picture: a QWidget that pulls frames from the session.
+ * The Atari's picture on the GPU: a QRhiWidget that keeps one texture the
+ * size of the frame (rebuilt when the frame's size changes) and draws one
+ * textured quad, only when the session has published a new frame (see
+ * FrameFeed). Qt picks Vulkan, Metal, D3D or OpenGL for it; the scaling,
+ * aspect and filtering all happen on the GPU.
+ *
+ * If no GPU device can be had it emits renderFailed() and the main window
+ * swaps in the software SoftDisplayWidget.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -7,25 +14,37 @@
 #pragma once
 
 #include <QImage>
-#include <QTimer>
-#include <QWidget>
+#include <QRhiWidget>
 #include <cstdint>
+#include <memory>
+#include <vector>
+#include <rhi/qrhi.h>
 
+#include "DisplayGeometry.h"
+#include "DisplayView.h"
+#include "FrameFeed.h"
 #include "a800session.h"
 
-class DisplayWidget : public QWidget {
+class DisplayWidget : public QRhiWidget, public DisplayView {
     Q_OBJECT
 public:
     explicit DisplayWidget(a800session *session, QWidget *parent = nullptr);
-    /* The TV's shape (the frame's pixel aspect applied), or square pixels. */
-    void setTvAspect(bool tv);
-    void setSmooth(bool smooth);
-    /* The last frame as a PNG. */
-    bool savePng(const QString &path) const;
-    quint64 frames() const { return m_frames; }
+    ~DisplayWidget() override;
+
+    QWidget *widget() override { return this; }
+    void setTvAspect(bool tv) override;
+    void setSmooth(bool smooth) override;
+    bool savePng(const QString &path) const override;
+    quint64 frames() const override;
 
 protected:
-    void paintEvent(QPaintEvent *) override;
+    void initialize(QRhiCommandBuffer *cb) override;
+    void render(QRhiCommandBuffer *cb) override;
+    void releaseResources() override;
+    void showEvent(QShowEvent *) override;
+    void hideEvent(QHideEvent *) override;
+    bool event(QEvent *e) override;
+    bool eventFilter(QObject *watched, QEvent *e) override;
     void mouseMoveEvent(QMouseEvent *e) override;
     void mousePressEvent(QMouseEvent *e) override;
     void mouseReleaseEvent(QMouseEvent *e) override;
@@ -35,19 +54,29 @@ protected:
     bool focusNextPrevChild(bool) override { return false; }
 
 private:
-    void tick();
-    double pictureAspect() const;
-    void pointerAt(const QPointF &p, unsigned buttons);
+    void onFrame();
+    void updateActive();
+    void makeTexture();
+    void makeBindings();
+    QRectF shown() const;
 
     a800session *m_session;
-    QImage m_image;             /* the session's buffer, A800SESSION_FB_MAX_* */
+    FrameFeed *m_feed;
+    PointerMapper m_pointer;
+    std::vector<uint32_t> m_fb;   /* XRGB8888 straight from the session, packed at the frame's width */
     int m_w = 336, m_h = 240, m_par = 1000;
     uint64_t m_serial = 0;
-    quint64 m_frames = 0;
-    QTimer m_timer;
+    bool m_haveFrame = false;
+    bool m_dirty = false;         /* m_fb holds a frame not yet uploaded */
     bool m_tvAspect = true;
     bool m_smooth = false;
-    QRectF m_shown;
-    QPointF m_last;
-    bool m_haveLast = false;
+    bool m_smoothApplied = false;
+
+    QRhi *m_rhi = nullptr;
+    QSize m_texSize;
+    std::unique_ptr<QRhiBuffer> m_ubuf;
+    std::unique_ptr<QRhiTexture> m_tex;
+    std::unique_ptr<QRhiSampler> m_nearest, m_linear;
+    std::unique_ptr<QRhiShaderResourceBindings> m_srb;
+    std::unique_ptr<QRhiGraphicsPipeline> m_pipeline;
 };

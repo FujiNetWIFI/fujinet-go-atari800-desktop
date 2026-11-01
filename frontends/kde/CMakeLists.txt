@@ -9,7 +9,8 @@
 
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.4 COMPONENTS Widgets QUIET)
+# Qt 6.7 for QRhiWidget (the GPU display); ShaderTools bakes its shaders.
+find_package(Qt6 6.7 COMPONENTS Widgets GuiPrivate ShaderTools QUIET)
 if(NOT Qt6_FOUND)
   message(STATUS "kde frontend: Qt6 Widgets not found -- skipping")
   return()
@@ -19,13 +20,21 @@ add_executable(fujinet-go-atari800-kde
   main.cpp
   MainWindow.cpp
   DisplayWidget.cpp
+  SoftDisplayWidget.cpp
+  FrameFeed.cpp
   KeyForward.cpp
   SettingsDialog.cpp
   FujiNetWindows.cpp
   controllers/ControllersWindow.cpp
   debugger/DebuggerWindow.cpp
 )
-target_link_libraries(fujinet-go-atari800-kde PRIVATE a800_session Qt6::Widgets)
+target_link_libraries(fujinet-go-atari800-kde PRIVATE a800_session Qt6::Widgets Qt6::GuiPrivate)
+# The display's shaders, baked for every backend and embedded as resources.
+# PREFIX "/", not "/shaders": the files are listed as shaders/display.*, so
+# the resource path is :/shaders/display.*.qsb (the display loads that).
+qt_add_shaders(fujinet-go-atari800-kde "display_shaders"
+  PREFIX "/"
+  FILES shaders/display.vert shaders/display.frag)
 target_compile_options(fujinet-go-atari800-kde PRIVATE -Wall -Wextra)
 target_include_directories(fujinet-go-atari800-kde PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(fujinet-go-atari800-kde PRIVATE
@@ -56,3 +65,10 @@ if(APPSTREAMCLI)
            COMMAND ${APPSTREAMCLI} validate --no-net --pedantic
                    ${CMAKE_CURRENT_BINARY_DIR}/online.fujinet.go.atari800.kde.metainfo.xml)
 endif()
+
+# Guard: the baked shaders must sit at :/shaders/display.{vert,frag}.qsb. A
+# wrong prefix leaves them empty at runtime and the display silently falls
+# back to software.
+add_test(NAME kde_shader_resource_path
+         COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_shader_qrc.cmake)

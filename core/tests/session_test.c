@@ -17,6 +17,9 @@ static void type_keys(a800session *s, const char *text)
     }
 }
 
+static volatile int g_cb_calls;
+static void on_frame(void *ctx) { (void)ctx; g_cb_calls++; }
+
 int main(void)
 {
     a800session *s = test_session("session");
@@ -39,6 +42,21 @@ int main(void)
         if (fb[i] != fb[0]) { colours = 1; break; }
     CHECK(colours, "picture has content");
     CHECK(a800session_refresh_rate(s) == 59923, "NTSC rate %d", a800session_refresh_rate(s));
+
+    /* the frame callback fires for new pictures; the frame counter runs on */
+    {
+        uint64_t n0 = a800session_frame_count(s);
+        int c0 = g_cb_calls;
+        a800session_set_frame_callback(s, on_frame, NULL);
+        type_keys(s, "PRINT 1\n");
+        test_sleep_ms(300);
+        a800session_set_frame_callback(s, NULL, NULL);
+        CHECK(g_cb_calls > c0, "frame callback called");
+        CHECK(a800session_frame_count(s) > n0 + 10, "frame count runs");
+        c0 = g_cb_calls;
+        test_sleep_ms(100);
+        CHECK(g_cb_calls == c0, "no callback after set(NULL)");
+    }
 
     /* typing */
     type_keys(s, "PRINT 6*7\n");

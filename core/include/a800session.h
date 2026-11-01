@@ -154,6 +154,18 @@ int  a800session_warp(a800session *s);
 int  a800session_copy_frame(a800session *s, uint32_t *dst, int *width, int *height,
                             int *par_milli, uint64_t *serial_inout);
 int  a800session_refresh_rate(a800session *s);  /* x1000: 59923 or 49860 */
+/* Ask to be told when a new frame is ready, for a frontend with no frame
+ * clock of its own: cb(ctx) runs on the thread that publishes frames (the
+ * emulator's) after each is stored; a frame identical to the previous one is
+ * not published again. Keep it quick (post an event) and do not call into the
+ * session from it. NULL stops the calls and returns only after any call in
+ * flight has finished, so ctx may be freed right after. */
+typedef void (*a800session_frame_cb)(void *ctx);
+void a800session_set_frame_callback(a800session *s, a800session_frame_cb cb, void *ctx);
+/* Frames the machine has run, including the ones identical to their
+ * predecessor (not published again): use it to ask "is the machine running",
+ * not "is the picture changing". */
+uint64_t a800session_frame_count(a800session *s);
 void a800session_notify_vsync(a800session *s, int64_t frame_time_ns);
 /* The 80-column card's picture instead of the Atari's (View menu). */
 void a800session_set_80col_display(a800session *s, int on);

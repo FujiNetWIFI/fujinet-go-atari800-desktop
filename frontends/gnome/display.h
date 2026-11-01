@@ -20,5 +20,6 @@ void a800_display_set_tv_aspect(A800Display *self, gboolean tv);
 void a800_display_set_smooth(A800Display *self, gboolean smooth);
 /* Saves the last frame as a PNG; FALSE on failure. */
 gboolean a800_display_save_png(A800Display *self, const char *path);
-/* Frames shown since it was made (A800_AUTOQUIT_FRAMES). */
+/* Frames the machine has run, once a picture has reached the widget
+ * (A800_AUTOQUIT_FRAMES). */
 guint64 a800_display_frames(A800Display *self);

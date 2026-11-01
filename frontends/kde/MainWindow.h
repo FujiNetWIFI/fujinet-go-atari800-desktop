@@ -12,7 +12,7 @@
 
 #include "a800session.h"
 
-class DisplayWidget;
+class DisplayView;
 class QAction;
 class QMenu;
 
@@ -42,6 +42,7 @@ private:
     void updateStatus();
     void fastTick();
     void applyView();
+    void useSoftwareDisplay();
     void showSettings();
     void powerCycle();
     void runSysaction(int sa);
@@ -56,7 +57,7 @@ private:
     void rememberFolder(const QString &path);
 
     a800session *m_session;
-    DisplayWidget *m_display = nullptr;
+    DisplayView *m_display = nullptr;
     QMenu *m_drives = nullptr;
     QMenu *m_cart = nullptr;
     QMenu *m_tape = nullptr;

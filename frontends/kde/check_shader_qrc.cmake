@@ -1,0 +1,15 @@
+# Fails unless the generated shader qrc maps shaders/display.{vert,frag}.qsb
+# under prefix "/" (so they load as :/shaders/display.*.qsb).
+file(GLOB_RECURSE qrcs "${BUILD_DIR}/.qt/rcc/*shaders*.qrc")
+if(NOT qrcs)
+  message(FATAL_ERROR "no generated shaders qrc under ${BUILD_DIR}/.qt/rcc")
+endif()
+file(READ "${qrcs}" qrc)
+foreach(stage vert frag)
+  if(NOT qrc MATCHES "alias=\"shaders/display\\.${stage}\\.qsb\"")
+    message(FATAL_ERROR "display.${stage}.qsb is not at shaders/display.${stage}.qsb in ${qrcs}")
+  endif()
+endforeach()
+if(NOT qrc MATCHES "prefix=\"/\"")
+  message(FATAL_ERROR "shaders qrc prefix is not \"/\" in ${qrcs}")
+endif()

@@ -830,6 +830,23 @@ static gboolean on_close(GtkWindow *w, gpointer d)
     return TRUE;
 }
 
+/* The refresh timers run only while the window is on screen: closing only
+ * hides it, and a hidden window has nobody to update. */
+static void on_map(GtkWidget *w, gpointer d)
+{
+    (void)w; (void)d;
+    if (!g_held_timer) g_held_timer = g_timeout_add(33, held_tick, NULL);
+    if (!g_pad_timer) g_pad_timer = g_timeout_add(250, pad_tick, NULL);
+}
+
+static void on_unmap(GtkWidget *w, gpointer d)
+{
+    (void)w; (void)d;
+    if (g_held_timer) g_source_remove(g_held_timer);
+    if (g_pad_timer) g_source_remove(g_pad_timer);
+    g_held_timer = g_pad_timer = 0;
+}
+
 static void on_destroy(GtkWidget *w, gpointer d)
 {
     (void)w; (void)d;
@@ -923,8 +940,8 @@ static void build_window(GtkWindow *parent)
     g_built_machine = -1;
     set_map_state(-2);
     rebuild();
-    g_held_timer = g_timeout_add(33, held_tick, NULL);
-    g_pad_timer = g_timeout_add(250, pad_tick, NULL);
+    g_signal_connect(g_window, "map", G_CALLBACK(on_map), NULL);
+    g_signal_connect(g_window, "unmap", G_CALLBACK(on_unmap), NULL);
 }
 
 static void show_window(void)

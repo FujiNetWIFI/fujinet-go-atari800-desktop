@@ -694,6 +694,17 @@ int a800session_refresh_rate(a800session* s)
 	return (int)std::lround(Impl(s)->host.Fps() * 1000.0);
 }
 
+void a800session_set_frame_callback(a800session* s, a800session_frame_cb cb, void* ctx)
+{
+	if (s)
+		Impl(s)->host.SetFrameCallback(cb, ctx);
+}
+
+uint64_t a800session_frame_count(a800session* s)
+{
+	return s ? Impl(s)->host.FrameCount() : 0;
+}
+
 void a800session_notify_vsync(a800session* s, int64_t frame_time_ns)
 {
 	Impl(s)->host.NotifyVsync(frame_time_ns);

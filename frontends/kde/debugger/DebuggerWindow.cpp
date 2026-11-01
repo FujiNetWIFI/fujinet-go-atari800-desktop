@@ -41,6 +41,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QHideEvent>
+#include <QShowEvent>
 #include <QImage>
 #include <QKeyEvent>
 #include <QLabel>
@@ -317,6 +318,7 @@ public:
 protected:
     bool event(QEvent *e) override;
     void keyPressEvent(QKeyEvent *e) override;
+    void showEvent(QShowEvent *e) override;
     void hideEvent(QHideEvent *e) override;
     bool eventFilter(QObject *obj, QEvent *e) override;
 
@@ -524,7 +526,7 @@ DebuggerWindow::DebuggerWindow(a800session *session, QWidget *parent)
     statusBar();
 
     connect(&m_timer, &QTimer::timeout, this, [this] { tick(); });
-    m_timer.start(100);
+    /* the refresh timer runs only while the window is shown (showEvent) */
 }
 
 /* Gone with the main window (the session outlives it): the machine runs on. */
@@ -2080,12 +2082,19 @@ void DebuggerWindow::keyPressEvent(QKeyEvent *e)
     }
 }
 
+void DebuggerWindow::showEvent(QShowEvent *e)
+{
+    m_timer.start(100);
+    QMainWindow::showEvent(e);
+}
+
 /* Hidden by F12, the close button or the main window: the engine goes
  * away and the machine runs on. The close button is a plain close, which
  * only hides the window (it is kept, and comes back as it was). A
  * minimised window's spontaneous hide is not a detach. */
 void DebuggerWindow::hideEvent(QHideEvent *e)
 {
+    m_timer.stop();
     if (!e->spontaneous()) {
         a800debug_detach(m_dbg);      /* lets it run; a waiting assembler gives up */
         m_attachedRunning = false;

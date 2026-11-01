@@ -39,6 +39,7 @@
 #include <QVBoxLayout>
 
 #include "DisplayWidget.h"
+#include "SoftDisplayWidget.h"
 #include "FujiNetWindows.h"
 #include "KeyForward.h"
 #include "SettingsDialog.h"
@@ -65,9 +66,13 @@ MainWindow::MainWindow(a800session *session, QWidget *parent)
     resize(864, 720 + 60);
     setAcceptDrops(true);
 
-    m_display = new DisplayWidget(session, this);
-    setCentralWidget(m_display);
-    m_display->setFocus();
+    auto *gpu = new DisplayWidget(session, this);
+    m_display = gpu;
+    setCentralWidget(gpu);
+    /* No usable GPU device: fall back to painting in software */
+    connect(gpu, &QRhiWidget::renderFailed, this, &MainWindow::useSoftwareDisplay,
+            Qt::QueuedConnection);
+    gpu->setFocus();
 
     m_dot = new QLabel(QStringLiteral("●"));
     m_dot->setToolTip(QStringLiteral("FujiNet link"));
@@ -670,6 +675,17 @@ void MainWindow::showAbout()
                        "Copyright © 2026 Thomas Cherryhomes — GPL-3.0-or-later<br>"
                        "<a href=\"https://fujinet.online/\">fujinet.online</a>")
             .arg(QStringLiteral(A800_VERSION_STRING)));
+}
+
+void MainWindow::useSoftwareDisplay()
+{
+    if (dynamic_cast<SoftDisplayWidget *>(m_display))
+        return;
+    auto *soft = new SoftDisplayWidget(m_session, this);
+    m_display = soft;
+    setCentralWidget(soft);   /* deletes the GPU display, which stops its feed */
+    applyView();
+    soft->setFocus();
 }
 
 /* ---- view, status --------------------------------------------------------------------- */

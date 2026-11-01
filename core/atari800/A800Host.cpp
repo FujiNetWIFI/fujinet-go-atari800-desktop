@@ -408,19 +408,48 @@ void A800Host::PublishFrame()
 	int w = 0, h = 0, par = 1000;
 	if (!a8video_render(_render.data(), 672, 300, &w, &h, &par, &o))
 		return;
-	std::lock_guard<std::mutex> lock(_frameLock);
-	memcpy(_frame.data(), _render.data(), (size_t)w * h * sizeof(uint32_t));
-	_frameW = w;
-	_frameH = h;
-	_framePar = par;
-	_frameSerial++;
+	_frameCount.fetch_add(1);
+	{
+		std::lock_guard<std::mutex> lock(_frameLock);
+		// A frame identical to the one in the slot is not a new frame: the
+		// machine runs at 60 Hz whatever it shows, and a still screen would
+		// otherwise be copied, uploaded and drawn sixty times a second.
+		if (_frameValid && w == _frameW && h == _frameH && par == _framePar &&
+		    memcmp(_frame.data(), _render.data(), (size_t)w * h * sizeof(uint32_t)) == 0)
+			return;
+		memcpy(_frame.data(), _render.data(), (size_t)w * h * sizeof(uint32_t));
+		_frameW = w;
+		_frameH = h;
+		_framePar = par;
+		_frameValid = true;
+		_frameSerial++;
+	}
+	CallFrameCb();
+}
+
+void A800Host::CallFrameCb()
+{
+	std::lock_guard<std::mutex> lock(_cbLock);
+	if (_frameCb)
+		_frameCb(_frameCbCtx);
+}
+
+void A800Host::SetFrameCallback(void (*cb)(void*), void* ctx)
+{
+	std::lock_guard<std::mutex> lock(_cbLock);
+	_frameCb = cb;
+	_frameCbCtx = ctx;
 }
 
 void A800Host::ClearFrame()
 {
-	std::lock_guard<std::mutex> lock(_frameLock);
-	std::fill(_frame.begin(), _frame.begin() + (size_t)_frameW * _frameH, 0xff000000u);
-	_frameSerial++;
+	{
+		std::lock_guard<std::mutex> lock(_frameLock);
+		std::fill(_frame.begin(), _frame.begin() + (size_t)_frameW * _frameH, 0xff000000u);
+		_frameValid = false;   // the next real frame is always published
+		_frameSerial++;
+	}
+	CallFrameCb();
 }
 
 bool A800Host::CopyFrame(uint32_t* dst, size_t maxPixels, int& width, int& height,

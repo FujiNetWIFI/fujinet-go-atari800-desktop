@@ -760,8 +760,20 @@ static void refresh_gtia(DbgWin *w)
             }
         }
     }
-    w->palette_ok = a800debug_palette_image(w->dbg, w->palette_px) != 0;
-    gtk_widget_queue_draw(w->palette);
+    /* the palette follows the TV standard and the artifacting: redraw only
+     * when its pixels changed */
+    {
+        const gsize bytes = (gsize)A800DEBUG_PALETTE_WIDTH * A800DEBUG_PALETTE_HEIGHT * sizeof(guint32);
+        guint32 *fresh = g_malloc(bytes);
+        gboolean ok = a800debug_palette_image(w->dbg, fresh) != 0;
+
+        if (ok != w->palette_ok || (ok && memcmp(fresh, w->palette_px, bytes) != 0)) {
+            memcpy(w->palette_px, fresh, bytes);
+            w->palette_ok = ok;
+            gtk_widget_queue_draw(w->palette);
+        }
+        g_free(fresh);
+    }
 }
 
 /* The IRQ bits by name, the set ones (or, active_low, the clear ones). */
@@ -2309,6 +2321,22 @@ static GtkWidget *build_fujinet(DbgWin *w)
     return padded(paned);
 }
 
+/* The refresh timer runs only while the window is on screen. */
+static void on_map(GtkWidget *widget, gpointer ud)
+{
+    DbgWin *w = ud;
+    (void)widget;
+    if (!w->timer) w->timer = g_timeout_add(100, tick_refresh, w);
+}
+
+static void on_unmap(GtkWidget *widget, gpointer ud)
+{
+    DbgWin *w = ud;
+    (void)widget;
+    if (w->timer) g_source_remove(w->timer);
+    w->timer = 0;
+}
+
 static void on_destroy(GtkWidget *widget, gpointer ud)
 {
     DbgWin *w = ud;
@@ -2376,6 +2404,8 @@ void a800_debugger_show(GtkWindow *parent, a800session *session)
     }
     g_signal_connect(w->win, "close-request", G_CALLBACK(on_close), w);
     g_signal_connect(w->win, "destroy", G_CALLBACK(on_destroy), w);
+    g_signal_connect(w->win, "map", G_CALLBACK(on_map), w);
+    g_signal_connect(w->win, "unmap", G_CALLBACK(on_unmap), w);
 
     root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_box_append(GTK_BOX(root), build_toolbar(w));
@@ -2422,7 +2452,6 @@ void a800_debugger_show(GtkWindow *parent, a800session *session)
 
     gtk_window_present(w->win);
     attach_and_refresh(w);
-    w->timer = g_timeout_add(100, tick_refresh, w);
 }
 
 void a800_debugger_toggle(GtkWindow *parent, a800session *session)
