@@ -15,6 +15,7 @@
  */
 
 #import "SettingsWindow.h"
+#import "help/HelpWindow.h"
 
 #include <string.h>
 
@@ -429,12 +430,14 @@ static NSString *str(const char *s)
             [item setView:[self pageForRows:rows note:!strcmp(page, "Machine")
                 ? @"Machine settings apply together when Settings closes: the Atari power-cycles once."
                 : nil]];
+            [self addHelpButtonTo:item.view];
             [tabs addTabViewItem:item];
             if (!strcmp(page, "Peripherals")) {
                 /* the ROMs tab follows Peripherals, as in the other frontends */
                 NSTabViewItem *roms = [[NSTabViewItem alloc] initWithIdentifier:@"ROMs"];
                 [roms setLabel:@"ROMs"];
                 [roms setView:[self romsPage]];
+                [self addHelpButtonTo:roms.view];
                 [tabs addTabViewItem:roms];
             }
             [rows removeAllObjects];
@@ -452,9 +455,28 @@ static NSString *str(const char *s)
     [_window setReleasedWhenClosed:NO];
     [_window setDelegate:self];
     [_window setContentView:tabs];
+    tabs.delegate = self;
+    A800SetHelpContext(_window, [@"prefs/" stringByAppendingString:tabs.tabViewItems.firstObject.identifier]);
     [_window center];
     [self refresh];
     [_window makeKeyAndOrderFront:nil];
+}
+
+/* A page's Help button, bottom left; the tab's identifier names its topic. */
+- (void)addHelpButtonTo:(NSView *)page
+{
+    NSButton *help = A800HelpButton(nil);
+    help.translatesAutoresizingMaskIntoConstraints = NO;
+    [page addSubview:help];
+    [help.leadingAnchor constraintEqualToAnchor:page.leadingAnchor constant:20].active = YES;
+    [help.bottomAnchor constraintEqualToAnchor:page.bottomAnchor constant:-16].active = YES;
+}
+
+/* The Help button and Command+? open the page being shown. */
+- (void)tabView:(NSTabView *)tabView didSelectTabViewItem:(NSTabViewItem *)item
+{
+    (void)tabView;
+    A800SetHelpContext(_window, [@"prefs/" stringByAppendingString:item.identifier]);
 }
 
 - (void)windowWillClose:(NSNotification *)note

@@ -47,11 +47,26 @@ if(NOT SDL3_FOUND)
   return()
 endif()
 
+# The Help, embedded: data/help/help.md as topics of styled spans
+# (core/include/a800help.h), which every frontend lays out with its own
+# toolkit. help_data.h declares the table; the build generates it.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(A800_HELP_C "${CMAKE_BINARY_DIR}/generated/help_content.c")
+add_custom_command(
+  OUTPUT "${A800_HELP_C}"
+  COMMAND "${Python3_EXECUTABLE}" -I "${CMAKE_SOURCE_DIR}/tools/help/make-help.py"
+          --src "${CMAKE_SOURCE_DIR}/data/help/help.md"
+          --out-c "${A800_HELP_C}"
+  DEPENDS "${CMAKE_SOURCE_DIR}/tools/help/make-help.py"
+          "${CMAKE_SOURCE_DIR}/data/help/help.md"
+  COMMENT "Help"
+  VERBATIM)
+
 set(A800_SESSION_C_SOURCES
   src/settings.c src/paths.c src/prefs.c src/roms.c src/zipread.c src/keymap.c
   src/bindings.c src/hid_keys.c src/audio_sdl.c src/gamepad_sdl.c src/fujinet_runtime.c
-  src/fujinet_api.c src/fuji_trace.c
-  "${A800_ROMS_C}")
+  src/fujinet_api.c src/fuji_trace.c src/help.c
+  "${A800_ROMS_C}" "${A800_HELP_C}")
 set(A800_SESSION_CXX_SOURCES src/session.cpp src/input.cpp src/media.cpp src/debug.cpp)
 
 add_library(a800_session STATIC ${A800_SESSION_C_SOURCES} ${A800_SESSION_CXX_SOURCES})
@@ -62,6 +77,7 @@ target_link_libraries(a800_session PUBLIC a800_host SDL3::SDL3 ${CMAKE_DL_LIBS})
 set_source_files_properties(${A800_SESSION_C_SOURCES} ${A800_SESSION_CXX_SOURCES}
   PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra")
 set_source_files_properties("${A800_ROMS_C}" PROPERTIES COMPILE_OPTIONS "-w")
+set_source_files_properties("${A800_HELP_C}" PROPERTIES GENERATED TRUE)
 target_compile_definitions(a800_session PRIVATE
   A800_DEV_FUJINET_OUT="${CMAKE_SOURCE_DIR}/tools/fujinet/work/out"
   A800_INSTALL_DATADIR="${CMAKE_INSTALL_FULL_DATADIR}/fujinet-go-atari800"

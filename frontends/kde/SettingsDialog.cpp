@@ -32,12 +32,14 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QShortcut>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <vector>
 
 #include "controllers/ControllersWindow.h"
+#include "help/HelpWindow.h"
 
 namespace {
 
@@ -315,6 +317,7 @@ int SettingsDialog::run(QWidget *parent, a800session *session, const std::functi
     QVBoxLayout *pageLayout = nullptr;
     QFormLayout *form = nullptr;
     QString lastPage, lastGroup;
+    QStringList pageNames;   /* each tab's Help context suffix, by tab index */
     for (int i = 0; i < a800session_pref_count(); i++) {
         const a800_pref *p = a800session_pref(i);
         const QString pg = QString::fromUtf8(p->page), gr = QString::fromUtf8(p->group);
@@ -328,8 +331,11 @@ int SettingsDialog::run(QWidget *parent, a800session *session, const std::functi
             scroll->setWidgetResizable(true);
             scroll->setFrameShape(QFrame::NoFrame);
             tabs->addTab(scroll, pg);
-            if (pg == QLatin1String("Peripherals"))
+            pageNames << pg;
+            if (pg == QLatin1String("Peripherals")) {
                 tabs->addTab(romsPage(st), QStringLiteral("ROMs"));
+                pageNames << QStringLiteral("ROMs");
+            }
             lastPage = pg;
             lastGroup.clear();
             if (pg == QLatin1String("Machine")) {
@@ -360,8 +366,20 @@ int SettingsDialog::run(QWidget *parent, a800session *session, const std::functi
     if (pageLayout)
         pageLayout->addStretch(1);
 
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+    /* Help, F1 and Ctrl+Shift+H (the app's shortcuts don't reach a modal
+     * dialog) open the page's own */
+    auto helpContext = [&dlg, tabs, pageNames] {
+        const int i = tabs->currentIndex();
+        dlg.setProperty("a800HelpContext",
+                        QStringLiteral("prefs/") + (i >= 0 && i < pageNames.size() ? pageNames[i] : QStringLiteral("Machine")));
+    };
+    helpContext();
+    QObject::connect(tabs, &QTabWidget::currentChanged, &dlg, helpContext);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close | QDialogButtonBox::Help);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    QObject::connect(buttons, &QDialogButtonBox::helpRequested, &dlg, [&dlg] { a800HelpFor(&dlg); });
+    for (const char *key : { "F1", "Ctrl+Shift+H" })
+        new QShortcut(QKeySequence(QString::fromLatin1(key)), &dlg, [&dlg] { a800HelpFor(&dlg); });
     auto *v = new QVBoxLayout(&dlg);
     v->addWidget(tabs);
     v->addWidget(buttons);

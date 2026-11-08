@@ -19,6 +19,7 @@ enable_language(RC)
 
 add_executable(fujinet-go-atari800-windows WIN32
   main.c
+  help/help_window.c
   prefs.c
   controllers/controller_window.c
   debugger/dbg_window.c

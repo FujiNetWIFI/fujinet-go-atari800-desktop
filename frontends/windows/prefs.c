@@ -15,6 +15,7 @@
  */
 
 #include "prefs.h"
+#include "help/help_window.h"
 
 #include <commctrl.h>
 #include <shlobj.h>
@@ -32,6 +33,7 @@
 #define CTRL_W 300
 #define PAGE_W 560
 #define ID_TABS 3000
+#define ID_PREFS_HELP 3001
 #define ID_ROM_LIST 3001
 #define ID_ROM_IMPORT 3002
 #define ID_ROW 3100             /* + pref * 4 + part */
@@ -236,6 +238,19 @@ static void show_page(int n)
     int i;
     for (i = 0; i < g_page_count; i++)
         ShowWindow(g_pages[i], i == n ? SW_SHOW : SW_HIDE);
+    /* Help, F1 and Ctrl+Shift+H open the page's own: the tab's text names it */
+    if (g_tabs && g_win) {
+        char name[16] = "", ctx[32];
+        TCITEMA item;
+        memset(&item, 0, sizeof item);
+        item.mask = TCIF_TEXT;
+        item.pszText = name;
+        item.cchTextMax = (int)sizeof name;
+        if (SendMessageA(g_tabs, TCM_GETITEMA, (WPARAM)n, (LPARAM)&item)) {
+            snprintf(ctx, sizeof ctx, "prefs/%s", name);
+            a800_help_set_context(g_win, ctx, 1);
+        }
+    }
 }
 
 /* The pages are children of the window (not of the tab control), so their
@@ -274,6 +289,7 @@ static LRESULT CALLBACK prefs_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_COMMAND: {
         const int id = LOWORD(wp), code = HIWORD(wp);
         int i, part;
+        if (id == ID_PREFS_HELP) { a800_help_for(g_win); return 0; }
         if (id == ID_ROM_IMPORT) { import_rom(); return 0; }
         if (id < ID_ROW || g_syncing) return 0;
         i = (id - ID_ROW) / 4;
@@ -485,13 +501,14 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
     page_h += 12;
     if (page_h < 420) page_h = 420;
 
-    SetRect(&want, 0, 0, PAGE_W + 24, page_h + 48);
+    SetRect(&want, 0, 0, PAGE_W + 24, page_h + 48 + 36);
     AdjustWindowRectEx(&want, style, FALSE, 0);
     GetWindowRect(parent, &pr);
     g_win = CreateWindowA("A800PrefsWindow", "Settings", style, pr.left + 40, pr.top + 40,
                           want.right - want.left, want.bottom - want.top, NULL, NULL,
                           GetModuleHandleA(NULL), NULL);
     g_tabs = child(g_win, 0, WC_TABCONTROLA, "", WS_CLIPSIBLINGS, 8, 8, PAGE_W + 8, page_h + 32, ID_TABS, g_font);
+    child(g_win, 0, "BUTTON", "Help", BS_PUSHBUTTON, 12, page_h + 48, 90, 26, ID_PREFS_HELP, g_font);
     SetRect(&area, 12, 36, 12 + PAGE_W, 36 + page_h);
 
     last_page = last_group = NULL;

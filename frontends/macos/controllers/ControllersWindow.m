@@ -38,6 +38,7 @@
 #import "ControllersWindow.h"
 
 #import "../KeyForward.h"
+#import "../help/HelpWindow.h"
 
 #include <math.h>
 #include <string.h>
@@ -314,6 +315,7 @@ static void drawFitted(NSString *text, NSRect r, CGFloat size, BOOL bold, NSColo
     int _padRows;
     unsigned _padGeneration;
     NSButton *_mapButton;
+    NSButton *_helpButton;
     NSButton *_defaultsButton;
     NSTextField *_hint;
     NSTimer *_timer;
@@ -355,6 +357,7 @@ static void drawFitted(NSString *text, NSRect r, CGFloat size, BOOL bold, NSColo
                     backing:NSBackingStoreBuffered
                       defer:NO];
     [_panel setTitle:@"Controllers"];
+    A800SetHelpContext(_panel, @"controllers");
     /* Floats above the machine's window, a full-screen one too. */
     [_panel setLevel:NSFloatingWindowLevel];
     [_panel setCollectionBehavior:NSWindowCollectionBehaviorFullScreenAuxiliary];
@@ -404,6 +407,9 @@ static void drawFitted(NSString *text, NSRect r, CGFloat size, BOOL bold, NSColo
     _defaultsButton = [NSButton buttonWithTitle:@"Defaults" target:self action:@selector(restoreDefaults:)];
     [_defaultsButton setRefusesFirstResponder:YES];
     [content addSubview:_defaultsButton];
+    _helpButton = A800HelpButton(@"controllers");
+    [_helpButton setRefusesFirstResponder:YES];
+    [content addSubview:_helpButton];
     _hint = [NSTextField wrappingLabelWithString:@""];
     [_hint setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
     [_hint setTextColor:[NSColor secondaryLabelColor]];
@@ -627,7 +633,8 @@ static void drawFitted(NSString *text, NSRect r, CGFloat size, BOOL bold, NSColo
     }
     [_mapButton setFrame:NSMakeRect(MARGIN, mapY, MAP_W, MAP_ROW_H)];
     [_defaultsButton setFrame:NSMakeRect(MARGIN + MAP_W + 6, mapY, DEFAULTS_W, MAP_ROW_H)];
-    [_hint setFrame:NSMakeRect(MARGIN + hintX, mapY + 1, w - hintX, MAP_ROW_H)];
+    [_helpButton setFrameOrigin:NSMakePoint(MARGIN + w - _helpButton.frame.size.width, mapY + 2)];
+    [_hint setFrame:NSMakeRect(MARGIN + hintX, mapY + 1, w - hintX - _helpButton.frame.size.width - 6, MAP_ROW_H)];
 }
 
 - (void)rebuild

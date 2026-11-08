@@ -32,6 +32,7 @@
 #include "a800session.h"
 #include "controllers/controller_window.h"
 #include "debugger/dbg_window.h"
+#include "help/help_window.h"
 #include "key_forward.h"
 #include "prefs.h"
 #include "resource.h"
@@ -671,6 +672,8 @@ static void build_menu(HWND hwnd)
     AppendMenuA(fuji, MF_STRING, IDM_FUJINET_LOG, "Console &Log");
     AppendMenuA(fuji, MF_STRING, IDM_FUJINET_RESTART, "&Restart FujiNet");
 
+    AppendMenuA(help, MF_STRING, IDM_HELP, APP_TITLE " &Help\tCtrl+Shift+H");
+    AppendMenuA(help, MF_SEPARATOR, 0, NULL);
     AppendMenuA(help, MF_STRING, IDM_ABOUT, "&About " APP_TITLE);
 
     AppendMenuA(bar, MF_POPUP, (UINT_PTR)g_machine_menu, "&Machine");
@@ -689,7 +692,8 @@ static void build_menu(HWND hwnd)
 /* ---- FujiNet console log -------------------------------------------------------- */
 
 static HWND g_log_window;
-static HWND g_log_edit;
+static HWND g_log_edit, g_log_help;
+#define LOG_BAR 34
 
 static void log_refresh(void)
 {
@@ -727,9 +731,13 @@ static LRESULT CALLBACK log_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE: {
         RECT rc;
         GetClientRect(hwnd, &rc);
-        if (g_log_edit) MoveWindow(g_log_edit, 0, 0, rc.right - rc.left, rc.bottom - rc.top, TRUE);
+        if (g_log_edit) MoveWindow(g_log_edit, 0, LOG_BAR, rc.right - rc.left, rc.bottom - rc.top - LOG_BAR, TRUE);
+        if (g_log_help) MoveWindow(g_log_help, rc.right - 84, 4, 76, LOG_BAR - 8, TRUE);
         return 0;
     }
+    case WM_COMMAND:
+        if (LOWORD(wp) == IDC_LOG_HELP) { a800_help_for(hwnd); return 0; }
+        break;
     case WM_TIMER:
         if (wp == IDT_LOG_REFRESH) log_refresh();
         return 0;
@@ -740,6 +748,7 @@ static LRESULT CALLBACK log_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         KillTimer(hwnd, IDT_LOG_REFRESH);
         g_log_window = NULL;
         g_log_edit = NULL;
+        g_log_help = NULL;
         return 0;
     }
     return DefWindowProcA(hwnd, msg, wp, lp);
@@ -768,6 +777,11 @@ static void show_fujinet_log(void)
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
         0, 0, rc.right - rc.left, rc.bottom - rc.top, g_log_window, (HMENU)(INT_PTR)IDC_LOG_EDIT, g_inst, NULL);
     SendMessageA(g_log_edit, WM_SETFONT, (WPARAM)GetStockObject(ANSI_FIXED_FONT), TRUE);
+    g_log_help = CreateWindowA("BUTTON", "Help", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
+                               g_log_window, (HMENU)(INT_PTR)IDC_LOG_HELP, g_inst, NULL);
+    SendMessageA(g_log_help, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+    a800_help_set_context(g_log_window, "fujilog", 1);
+    SendMessageA(g_log_window, WM_SIZE, 0, 0);
     SetTimer(g_log_window, IDT_LOG_REFRESH, 1000, NULL);
     log_refresh();
     ShowWindow(g_log_window, SW_SHOW);
@@ -1154,6 +1168,7 @@ static void command(HWND hwnd, int id)
         else
             notice("FujiNet restarted");
         break;
+    case IDM_HELP: a800_help_for(g_hwnd); break;
     case IDM_ABOUT: about(); break;
     default: break;
     }
@@ -1353,6 +1368,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
                             CW_USEDEFAULT, CW_USEDEFAULT, want.right - want.left,
                             want.bottom - want.top + 24, NULL, NULL, inst, NULL);
     if (!g_hwnd) return 1;
+    a800_help_set_context(g_hwnd, "main", 0);
     apply_view();
     build_menu(g_hwnd);
     g_statusbar = CreateWindowExA(0, STATUSCLASSNAMEA, "", WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
@@ -1398,6 +1414,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
          * regardless of which child control has the focus. */
         if (a800_debugger_pretranslate(&msg)) continue;
         if (a800_controller_pretranslate(&msg)) continue;
+        if (a800_help_pretranslate(&msg)) continue;
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }

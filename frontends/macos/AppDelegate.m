@@ -21,6 +21,7 @@
 #import "SettingsWindow.h"
 #import "controllers/ControllersWindow.h"
 #import "debugger/DebuggerWindow.h"
+#import "help/HelpWindow.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -204,6 +205,7 @@ static NSString *str(const char *s)
     [_window setTitle:APP_TITLE];
     [_window setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary];
     [_window setContentMinSize:NSMakeSize(320, 240 + STATUS_HEIGHT)];
+    A800SetHelpContext(_window, @"main");
     [_window center];
 
     _content = [[A800ContentView alloc] initWithFrame:frame];
@@ -931,9 +933,10 @@ static NSString *str(const char *s)
         return;
     }
     if (!_logWindow) {
-        NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 860, 600)];
+        NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 36, 860, 564)];
         scroll.hasVerticalScroller = YES;
         scroll.autohidesScrollers = NO;
+        scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         _logView = [[NSTextView alloc] initWithFrame:scroll.bounds];
         _logView.editable = NO;
         _logView.richText = NO;
@@ -949,7 +952,17 @@ static NSString *str(const char *s)
         _logWindow.title = @"FujiNet Console Log";
         _logWindow.releasedWhenClosed = NO;
         _logWindow.delegate = self;
-        _logWindow.contentView = scroll;
+        {
+            /* the log over a strip with the Help button */
+            NSView *box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 860, 600)];
+            NSButton *help = A800HelpButton(@"fujilog");
+            [help setFrameOrigin:NSMakePoint(10, 6)];
+            help.autoresizingMask = NSViewMaxXMargin | NSViewMaxYMargin;
+            [box addSubview:scroll];
+            [box addSubview:help];
+            _logWindow.contentView = box;
+        }
+        A800SetHelpContext(_logWindow, @"fujilog");
         [_logWindow center];
     }
     if (!_logTimer)
@@ -1075,11 +1088,23 @@ static NSString *str(const char *s)
     [windows addItemWithTitle:@"Bring All to Front" action:@selector(arrangeInFront:) keyEquivalent:@""];
 
     NSMenu *help = [self addMenu:@"Help" to:bar];
+    /* openHelp:, not showHelp: (AppKit's: "Help isn't available") */
+    [self item:help title:APP_TITLE @" Help" action:@selector(openHelp:) key:@"?"];
+    [help addItem:[NSMenuItem separatorItem]];
     [self item:help title:@"About " APP_TITLE action:@selector(showAbout:) key:@""];
 
     [NSApp setMainMenu:bar];
     [NSApp setWindowsMenu:windows];
     [NSApp setHelpMenu:help];
+    /* the Help menu's search field finds the Help's sections too */
+    [NSApp registerUserInterfaceItemSearchHandler:[A800HelpWindow shared]];
+}
+
+/* For the window in front: Settings' page, the debugger's tab ... */
+- (void)openHelp:(id)sender
+{
+    (void)sender;
+    [[A800HelpWindow shared] showFor:[NSApp keyWindow]];
 }
 
 /* The Drives, Cartridge and Program Recorder menus, rebuilt as they open. */

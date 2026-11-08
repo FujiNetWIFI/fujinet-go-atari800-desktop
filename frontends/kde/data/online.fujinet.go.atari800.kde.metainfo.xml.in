@@ -29,7 +29,7 @@
       drives paddles, the Koala Pad, mice and the light pen, and a native
       debugger shows the 6502, disassembly with breakpoints and watchpoints,
       ANTIC and its display list, GTIA, POKEY, PIA, the memory map and every
-      SIO command.
+      SIO command. Built-in, searchable Help covers all of it.
     </p>
   </description>
   <launchable type="desktop-id">online.fujinet.go.atari800.kde.desktop</launchable>

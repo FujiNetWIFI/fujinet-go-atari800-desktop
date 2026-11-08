@@ -20,6 +20,7 @@
  */
 
 #include "prefs.h"
+#include "help/help_window.h"
 
 #include "controllers/controllers_window.h"
 
@@ -380,6 +381,7 @@ static AdwPreferencesPage *build_roms_page(PrefsState *st)
     char desc[1200];
 
     adw_preferences_page_set_title(page, "ROMs");
+    adw_preferences_page_set_name(page, "ROMs");
     adw_preferences_page_set_icon_name(page, "media-flash-symbolic");
     for (int r = 0; r < a800session_rom_slot_count() && r < MAX_ROM_ROWS; r++) {
         const a800_rom_slot *slot = a800session_rom_slot(r);
@@ -388,6 +390,8 @@ static AdwPreferencesPage *build_roms_page(PrefsState *st)
         if (!last || strcmp(last, slot->group) != 0) {
             group = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
             adw_preferences_group_set_title(group, slot->group);
+            if (!last)
+                adw_preferences_group_set_header_suffix(group, a800_help_button("prefs/ROMs"));
             if (!last) {
                 g_snprintf(desc, sizeof desc,
                     "The built-in AltirraOS and Altirra BASIC run everything without these. "
@@ -452,6 +456,7 @@ void a800_prefs_show(A800Window *parent, a800session *session)
         if (!last_page || strcmp(last_page, p->page) != 0) {
             page = ADW_PREFERENCES_PAGE(adw_preferences_page_new());
             adw_preferences_page_set_title(page, p->page);
+            adw_preferences_page_set_name(page, p->page);
             adw_preferences_page_set_icon_name(page, page_icon(p->page));
             adw_preferences_dialog_add(dlg, page);
             last_page = p->page;
@@ -462,6 +467,12 @@ void a800_prefs_show(A800Window *parent, a800session *session)
         if (!last_group || strcmp(last_group, p->group) != 0) {
             group = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
             adw_preferences_group_set_title(group, p->group);
+            if (!last_group) {
+                /* the first group on a page carries the page's Help button */
+                char ctx[64];
+                g_snprintf(ctx, sizeof ctx, "prefs/%s", p->page);
+                adw_preferences_group_set_header_suffix(group, a800_help_button(ctx));
+            }
             if (!strcmp(p->group, "Computer"))
                 adw_preferences_group_set_description(group,
                     "Machine settings apply together when Preferences closes: the Atari "

@@ -46,6 +46,15 @@ makes; Preferences ▸ Input ▸ Keys switches to the Atari's own key positions.
 Gamepads are picked up as they are plugged in and out; the Controllers panel
 assigns them to ports and maps keys and buttons.
 
+### Help
+
+**Help ▸ FujiNet Go Atari 800 Help** (Ctrl+Shift+H, ⌘? on a Mac; F6 stays the
+Atari's HELP key) opens a searchable Help, and the Help buttons in
+Preferences, the Controllers window, the debugger and the console log open
+the topic for what they show. The text is
+[data/help/help.md](data/help/help.md), which GitHub shows as it is; the build
+embeds it and every frontend lays it out natively.
+
 ### Debugger (F12)
 
 Stops the machine. Run/Stop F5, Step F7, Step Over F8, Step Out Shift+F8,

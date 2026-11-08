@@ -59,6 +59,7 @@
 
 #include "../FujiNetWindows.h"
 #include "../KeyForward.h"
+#include "../help/HelpWindow.h"
 
 namespace {
 
@@ -487,6 +488,7 @@ ControllersWindow::ControllersWindow(a800session *session, QWidget *parent)
 {
     setObjectName(QStringLiteral("controllers"));
     setWindowTitle(QStringLiteral("Controllers"));
+    setProperty("a800HelpContext", QStringLiteral("controllers"));
     setFocusPolicy(Qt::StrongFocus);
 
     m_root = new QVBoxLayout(this);
@@ -516,6 +518,7 @@ ControllersWindow::ControllersWindow(a800session *session, QWidget *parent)
     maprow->addWidget(m_mapButton);
     maprow->addWidget(defaults);
     maprow->addWidget(m_hint, 1);
+    maprow->addWidget(a800HelpButton(QStringLiteral("controllers")));
     m_root->addLayout(maprow);
 
     connect(&m_captureTimer, &QTimer::timeout, this, [this] { pollCapture(); });

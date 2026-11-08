@@ -68,6 +68,10 @@ if(BASH_PROGRAM AND WITH_FUJINET)
 endif()
 if(TARGET a800_session)
   # the address field's parser, and an external FujiNet (a UDP stand-in) end to end
+  # the built-in Help covers every setting, key, machine, ROM group and context
+  add_executable(help_test help_test.c)
+  target_link_libraries(help_test PRIVATE a800_session)
+  add_test(NAME help COMMAND help_test)
   add_executable(hostport_test hostport_test.c)
   target_link_libraries(hostport_test PRIVATE a800_session)
   add_test(NAME hostport COMMAND hostport_test)

@@ -30,6 +30,7 @@ add_executable(fujinet-go-atari800-macos MACOSX_BUNDLE
   AppDelegate.m
   DisplayView.m
   KeyForward.m
+  help/HelpWindow.m
   SettingsWindow.m
   controllers/ControllersWindow.m
   debugger/DebuggerWindow.m

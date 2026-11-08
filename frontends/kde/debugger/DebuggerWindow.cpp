@@ -62,6 +62,7 @@
 #include <QTextBlock>
 #include <QThread>
 #include <QTimer>
+#include <QShortcut>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -74,6 +75,7 @@
 #include <vector>
 
 #include "../FujiNetWindows.h"
+#include "../help/HelpWindow.h"
 #include "a800debug.h"
 
 #define DISASM_WINDOW 64        /* lines at most; as many show as fit */
@@ -517,10 +519,30 @@ DebuggerWindow::DebuggerWindow(a800session *session, QWidget *parent)
     m_status->setStyleSheet(QStringLiteral("color: gray;"));
     m_status->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     m_status->setContentsMargins(8, 0, 8, 0);
-    m_tabs->setCornerWidget(m_status, Qt::TopRightCorner);
     const int tab = tabFromEnv();
     if (tab >= 0) m_tabs->setCurrentIndex(tab);
-    connect(m_tabs, &QTabWidget::currentChanged, this, [this](int page) { refreshPage(page); });
+    /* a Help button for the tab that shows, and F1 */
+    auto *help = qobject_cast<QToolButton *>(a800HelpButton(QString()));
+    help->setAutoRaise(false);
+    help->setText(QStringLiteral("Help"));
+    help->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    {
+        auto *corner = new QWidget;
+        auto *cl = new QHBoxLayout(corner);
+        cl->setContentsMargins(0, 0, 0, 0);
+        cl->addWidget(m_status, 1);
+        cl->addWidget(help);
+        m_tabs->setCornerWidget(corner, Qt::TopRightCorner);
+    }
+    auto setContext = [this](int page) {
+        setProperty("a800HelpContext", QStringLiteral("debugger/%1").arg(QLatin1String(kTabs[page].name)));
+    };
+    new QShortcut(QKeySequence(Qt::Key_F1), this, [this] { a800HelpFor(this); });
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this, setContext](int page) {
+        setContext(page);
+        refreshPage(page);
+    });
+    setContext(m_tabs->currentIndex());
     root->addWidget(m_tabs, 1);
     setCentralWidget(central);
     statusBar();

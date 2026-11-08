@@ -8,6 +8,7 @@
  */
 
 #include "fujilog.h"
+#include "help/help_window.h"
 
 typedef struct {
     GtkWindow *win;
@@ -90,6 +91,16 @@ static gboolean refresh(gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
+static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint code,
+                       GdkModifierType st, gpointer ud)
+{
+    (void)c; (void)code; (void)st;
+    if (keyval != GDK_KEY_F1)
+        return FALSE;
+    a800_help_for(ud);
+    return TRUE;
+}
+
 void a800_fujilog_show(GtkWindow *parent, a800session *session)
 {
     static GtkWindow *existing;
@@ -124,8 +135,13 @@ void a800_fujilog_show(GtkWindow *parent, a800session *session)
 
     {
         GtkWidget *toolbar = adw_toolbar_view_new();
-        adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar),
-                                     adw_header_bar_new());
+        GtkWidget *header = adw_header_bar_new();
+        GtkEventController *keys = gtk_event_controller_key_new();
+        adw_header_bar_pack_end(ADW_HEADER_BAR(header), a800_help_button("fujilog"));
+        a800_help_set_context(lw->win, "fujilog");
+        g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key), lw->win);
+        gtk_widget_add_controller(GTK_WIDGET(lw->win), keys);
+        adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
         adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scroll);
         adw_window_set_content(ADW_WINDOW(lw->win), toolbar);
     }

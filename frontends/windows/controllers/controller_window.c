@@ -48,6 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../help/help_window.h"
 #include "../key_forward.h"
 
 #ifndef WM_DPICHANGED
@@ -140,7 +141,7 @@ static int g_content_w, g_total_w, g_total_h, g_ports_y;
 static RECT g_kbd_rc, g_port_rc[A800_PORTS], g_body_rc[A800_PORTS];
 static RECT g_paddle_label_rc[A800_PORTS][2];
 static RECT g_gp_rc, g_gp_head_rc, g_gp_row_rc[PAD_ROWS];
-static RECT g_map_rc, g_defaults_rc, g_hint_rc;
+static RECT g_map_rc, g_defaults_rc, g_help_rc, g_hint_rc;
 
 static HBRUSH g_accent_brush;
 static HFONT g_font, g_bold, g_small, g_key_font, g_key_small, g_sym_font;
@@ -429,7 +430,8 @@ static void layout_static(void)
 
     SetRect(&g_map_rc, left, y, left + S(MAP_W), y + S(BTN_H));
     SetRect(&g_defaults_rc, g_map_rc.right + S(6), y, g_map_rc.right + S(6) + S(DEFAULTS_W), y + S(BTN_H));
-    SetRect(&g_hint_rc, g_defaults_rc.right + S(10), y, left + g_content_w, y + S(BTN_H));
+    SetRect(&g_help_rc, left + g_content_w - S(64), y, left + g_content_w, y + S(BTN_H));
+    SetRect(&g_hint_rc, g_defaults_rc.right + S(10), y, g_help_rc.left - S(6), y + S(BTN_H));
     g_total_h = y + S(BTN_H) + S(MARGIN);
 }
 
@@ -879,6 +881,8 @@ static void paint_panel(HDC dc)
     text_line(dc, g_map_state == -2 ? "Map" : "Done", &g_map_rc, DT_CENTER);
     draw_face(dc, &g_defaults_rc, 0, 0, 0);
     text_line(dc, "Defaults", &g_defaults_rc, DT_CENTER);
+    draw_face(dc, &g_help_rc, 0, 0, 0);
+    text_line(dc, "Help", &g_help_rc, DT_CENTER);
     SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
     text_line(dc, g_hint, &g_hint_rc, DT_LEFT | DT_END_ELLIPSIS);
 }
@@ -1092,6 +1096,7 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         p.y = GET_Y_LPARAM(lp);
         SetFocus(hwnd);         /* typing goes to the Atari again after a slider */
         if (PtInRect(&g_map_rc, p)) { set_map_state(g_map_state == -2 ? -1 : -2); return 0; }
+        if (PtInRect(&g_help_rc, p)) { a800_help_show(hwnd, "controllers"); return 0; }
         if (PtInRect(&g_defaults_rc, p)) {
             a800session_bindings_reset(g_session);
             if (g_map_state < 0) set_hint("Every key and button is back to its default");
@@ -1304,6 +1309,7 @@ static int create_panel(void)
                               CW_USEDEFAULT, CW_USEDEFAULT, want.right - want.left, want.bottom - want.top,
                               g_parent, NULL, inst, NULL);
     if (!g_panel) return 0;
+    a800_help_set_context(g_panel, "controllers", 0);    /* keys here go to the Atari */
     g_tip = CreateWindowExA(WS_EX_TOPMOST, TOOLTIPS_CLASSA, NULL, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
                             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
                             g_panel, NULL, inst, NULL);

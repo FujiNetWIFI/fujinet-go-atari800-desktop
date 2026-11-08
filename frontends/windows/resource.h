@@ -46,6 +46,7 @@
 #define IDM_FUJINET_CONFIG 1070
 #define IDM_FUJINET_LOG    1071
 #define IDM_FUJINET_RESTART 1072
+#define IDM_HELP           1079
 #define IDM_ABOUT          1080
 
 /* Ranges: + the drive (0-7); + drive * 4 + density; + the console key. */
@@ -57,6 +58,7 @@
 
 #define IDC_STATUSBAR      2200
 #define IDC_LOG_EDIT       2100
+#define IDC_LOG_HELP       2101
 #define IDT_LOG_REFRESH    1
 #define IDT_STATUS         2
 #define IDT_SYSACT         3

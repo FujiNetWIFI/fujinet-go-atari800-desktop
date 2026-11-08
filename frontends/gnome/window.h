@@ -18,6 +18,10 @@ GtkWidget *a800_window_new(AdwApplication *app, a800session *session);
 const char *a800_icon_name(void);
 void a800_window_toast(A800Window *self, const char *text);
 
+/* The Help context the main window shows now: "main", or "prefs/<page>"
+ * while Preferences is open. */
+const char *a800_window_help_context(A800Window *self);
+
 /* Starts the machine (FujiNet first). */
 void a800_window_start(A800Window *self);
 
