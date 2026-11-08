@@ -103,6 +103,30 @@ int main(void)
     SDL_SetJoystickVirtualButton(vj, SDL_GAMEPAD_BUTTON_BACK, false);
     expect(s, 0, 0, 0, "released");
 
+    /* A trigger past half travel used to deadlock the gamepad thread on its
+     * own lock, and the Controllers panel's timers (same lock) froze the UI
+     * with it. A hang here is a ctest timeout. */
+    a800session_binding_set_button(s, A800_TARGET_CONSOLE(A800_CON_OPTION), A800_PAD_BTN_LEFT_TRIGGER, NULL, 0);
+    SDL_SetJoystickVirtualAxis(vj, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767);
+    expect(s, 0, 0, B(A800_CON_OPTION), "left trigger presses its binding");
+    (void)a800session_gamepad_generation(s);
+    (void)a800session_gamepad_effective_port(s, idx);
+    printf("ok: session lock still free with a trigger held\n");
+    SDL_SetJoystickVirtualAxis(vj, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 0);
+    expect(s, 0, 0, 0, "left trigger released");
+    a800session_gamepad_capture_begin(s);
+    SDL_SetJoystickVirtualAxis(vj, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 32767);
+    {
+        int btn = A800_PAD_BTN_NONE, got = 0;
+        for (i = 0; i < 100 && !got; i++) {
+            got = a800session_gamepad_capture_poll(s, &btn);
+            if (!got) test_sleep_ms(20);
+        }
+        CHECK(got && btn == A800_PAD_BTN_RIGHT_TRIGGER, "map mode captures a trigger (%d)", btn);
+    }
+    SDL_SetJoystickVirtualAxis(vj, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 0);
+    a800session_bindings_reset(s);
+
     /* chosen port 2, unplugged while holding a direction */
     a800session_gamepad_assign(s, idx, 1);
     SDL_SetJoystickVirtualButton(vj, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true);
