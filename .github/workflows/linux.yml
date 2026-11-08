@@ -59,7 +59,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tools/fujinet/work
-          key: fujinet-linux-${{ hashFiles('cmake/Dependencies.cmake', 'tools/fujinet/**') }}
+          key: fujinet-linux-${{ hashFiles('cmake/Dependencies.cmake', 'tools/fujinet/*.sh', 'tools/fujinet/patches/**', 'tools/fujinet/support/**') }}
 
       - name: Configure
         run: |
