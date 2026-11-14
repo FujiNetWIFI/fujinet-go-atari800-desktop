@@ -284,6 +284,11 @@ static NSString *str(const char *s)
 - (void)applicationWillTerminate:(NSNotification *)note
 {
     (void)note;
+    /* Close the windows while the session is alive: AppKit closes them after
+     * this returns, and their resign-key / will-close handlers use it. */
+    _window.delegate = nil;
+    for (NSWindow *w in [[NSApp windows] copy])
+        if (w != _window) [w close];
     [_statusTimer invalidate];
     [_fastTimer invalidate];
     [_logTimer invalidate];
@@ -311,7 +316,7 @@ static NSString *str(const char *s)
 - (void)windowDidResignKey:(NSNotification *)note
 {
     /* focus gone: nothing stays held (the Controllers panel takes typing too) */
-    if (note.object == _window && ![_controllers isVisible])
+    if (_session && note.object == _window && ![_controllers isVisible])
         a800session_release_all(_session);
 }
 
