@@ -23,6 +23,15 @@
   <string>13.3</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.games</string>
+  <!-- A game to the system: Game Mode (macOS 14+, when frontmost in full
+       screen) gives it CPU/GPU priority and lowers controller and audio
+       latency; the app is light enough to stay on the integrated GPU. -->
+  <key>LSSupportsGameMode</key>
+  <true/>
+  <key>GCSupportsGameMode</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
   <key>NSHumanReadableCopyright</key>
   <string>Copyright © 2026 Thomas Cherryhomes. GPL-3.0-or-later.</string>
   <key>NSHighResolutionCapable</key>

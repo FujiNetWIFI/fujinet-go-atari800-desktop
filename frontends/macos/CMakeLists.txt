@@ -60,6 +60,7 @@ target_link_libraries(fujinet-go-atari800-macos PRIVATE a800_session
   "-framework CoreVideo"    # CVDisplayLink: this platform's frame clock
   "-framework CoreGraphics"
   "-framework QuartzCore"
+  "-framework Metal"        # the picture is a texture on a CAMetalLayer
   "-framework UniformTypeIdentifiers"   # UTType: the open panels' filters
   "-framework Carbon")      # kVK_* virtual key codes
 target_compile_options(fujinet-go-atari800-macos PRIVATE -Wall -Wextra

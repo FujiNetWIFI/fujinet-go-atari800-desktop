@@ -134,6 +134,7 @@ static NSString *str(const char *s)
     BOOL _launched;
     NSWindow *_window;
     A800DisplayView *_display;
+    id<NSObject> _activity;          /* no App Nap, no timer coalescing while we run */
     A800ContentView *_content;
     A800Light *_linkLight;
     NSTextField *_statusText;
@@ -193,6 +194,13 @@ static NSString *str(const char *s)
 - (void)applicationDidFinishLaunching:(NSNotification *)note
 {
     (void)note;
+
+    /* An emulator is latency-critical work: App Nap must not throttle the
+     * machine thread or coalesce its timers when the window is behind
+     * another, and Game Mode (Info.plist) asks the system to favour it. */
+    _activity = [[NSProcessInfo processInfo]
+        beginActivityWithOptions:(NSActivityUserInitiated | NSActivityLatencyCritical)
+                          reason:@"Emulating an Atari 8-bit computer"];
 
     /* 336 x 240 at three times, a TV's shape */
     const NSRect frame = NSMakeRect(0, 0, 864, 720 + STATUS_HEIGHT);
@@ -293,6 +301,10 @@ static NSString *str(const char *s)
     [_fastTimer invalidate];
     [_logTimer invalidate];
     [_display stop];
+    if (_activity) {
+        [[NSProcessInfo processInfo] endActivity:_activity];
+        _activity = nil;
+    }
     a800session_stop(_session);
     a800session_settings_flush(_session);
     a800session_free(_session);
