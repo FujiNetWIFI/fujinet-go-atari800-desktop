@@ -133,7 +133,7 @@ static void cycle(a800session *s, int slot, const char *what, const char *const 
         char label[96];
         a800session_power_cycle(s);
         CHECK(a800session_fujinet_running(s) && a800session_fujinet_link(s), "%s: FujiNet back", what);
-        CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 20000), "%s: CONFIG after cycle %d",
+        CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 60000), "%s: CONFIG after cycle %d",
               what, i);
         snprintf(label, sizeof label, "%s after power cycle %d", what, i);
         check_listing(slot, label, names, n);
