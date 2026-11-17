@@ -183,6 +183,38 @@ check_controls(a800session *s, int p)
     }
 }
 
+/* The Controllers window: what it draws and does, and the count of controls. */
+static void
+check_controllers(int p)
+{
+    char buf[64];
+    static const char *const parts[] = {
+        "Joystick", "Paddles", "Atari ST mouse", "Amiga mouse", "Trak-Ball", "Koala Pad",
+        "Touch tablet", "Numeric keypad", "Light pen", "Light gun", "Aim on the picture",
+        "Start", "Select", "Option", "Reset", "Break", "Keyboard", "controllers_keyboard",
+        "Map", "Clear", "Defaults", "Show bindings", "A800_OPEN_CONTROLLERS",
+    };
+    static const char *const buttons[] = { "Map", "Clear", "Defaults", "Show bindings" };
+
+    for (size_t k = 0; k < sizeof parts / sizeof *parts; k++)
+        require(p, "controllers", "part", parts[k]);
+    for (size_t k = 0; k < sizeof buttons / sizeof *buttons; k++)
+        require(p, "changing-the-controls", "button", buttons[k]);
+    snprintf(buf, sizeof buf, "%d controls in all", A800_TARGET_COUNT);
+    require(p, "changing-the-controls", "count", buf);
+    require(p, "changing-the-controls", "reserved", "F9");
+    require(p, "changing-the-controls", "reserved", "F11");
+    require(p, "changing-the-controls", "reserved", "F12");
+    require(p, "gamepads", "assignment", "Automatic");
+    require(p, "gamepads", "assignment", "Port 4");
+    require(p, "gamepads", "remembered", "pad_assign");
+    require(p, "prefs/Input", "gamepad rows", "Reset Controls");
+    require(p, "prefs/Input", "gamepad rows", "Open Controllers");
+    require(p, "prefs/Input", "enable gamepads", "enable_gamepad");
+    require(p, "the-settings-file", "controls", "controllers_show_bindings");
+    require(p, "the-settings-file", "controls", "controllers_keyboard");
+}
+
 static void
 check_ports(int p)
 {
@@ -222,7 +254,7 @@ main(void)
         check_prefs(s, p);
         check_controls(s, p);
         check_ports(p);
-        
+        check_controllers(p);
     }
 
     /* lookup and search */

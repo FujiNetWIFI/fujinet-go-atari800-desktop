@@ -12,7 +12,7 @@ programs, all in one desktop app. A member of the FujiNet Go desktop family.
 | **ROMs** | None needed: AltirraOS and Altirra BASIC are built in. Atari's own OS, BASIC and peripheral ROMs can be imported (ROM images or MAME sets). |
 | **Peripherals** | XEP80, Austin Franklin and Bit 3 80-column cards, Proto80, MIO, Black Box, 1450XLD, Voice Box, MyIDE, R-Time 8, H: devices, Axlon/Mosaic/MapRAM, stereo POKEY. |
 | **FujiNet** | The firmware's `ATARI` PC target, in-process as `libfujinet`, on atari800's NetSIO hub: UDP **11514**, web UI **11515** (loopback). |
-| **Frontends** | GNOME (GTK4/libadwaita), KDE (Qt6 Widgets), macOS (AppKit), Windows (Win32/GDI): display, Controllers panel, Preferences, FujiNet log, debugger. |
+| **Frontends** | GNOME (GTK4/libadwaita), KDE (Qt6 Widgets), macOS (AppKit), Windows (Win32/GDI): display, Controllers window, Preferences, FujiNet log, debugger. |
 | **Packaging** | DEB/RPM/TGZ per Linux frontend, two Flatpaks, Windows zip and NSIS installer, macOS arm64 and x86_64 bundles. |
 
 ## Using it
@@ -43,8 +43,21 @@ programs, all in one desktop app. A member of the FujiNet Go desktop family.
 
 CONTROL+letter stays the Atari's. Keys type the character the host keyboard
 makes; Preferences ▸ Input ▸ Keys switches to the Atari's own key positions.
-Gamepads are picked up as they are plugged in and out; the Controllers panel
-assigns them to ports and maps keys and buttons.
+Gamepads are picked up as they are plugged in and out, including plain USB
+adapters; the Controllers window assigns each to a port (Automatic or Port 1 to
+4, remembered) and maps keys and buttons.
+
+### Controllers window (F9)
+
+Drawn like the real hardware, per port: the CX40 joystick (drag the stick), the
+CX30 paddles (drag or scroll a knob), the ST and Amiga mice, the Trak-Ball, the
+Koala Pad, the touch tablet and the CX85 keypad (the light pen and gun are aimed
+on the picture), with the console keys and the Atari's keyboard for the machine
+(400, 800, XL/XE, 1200XL). Held controls light up in orange, whoever holds them,
+so it doubles as a gamepad tester. **Map**, **Clear**, **Defaults** and **Show
+bindings** change the 30 controls (F9, F11, F12 and Ctrl chords cannot be
+bound). Preferences ▸ Input has the gamepad rows, **Reset Controls** and **Open
+Controllers**. `A800_OPEN_CONTROLLERS=1` opens the window at start.
 
 ### Help
 

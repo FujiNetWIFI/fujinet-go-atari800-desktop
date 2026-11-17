@@ -265,44 +265,112 @@ Key combinations with the Super (Windows) key are the desktop's.
 ## Gamepads
 
 Gamepads are picked up as they are plugged in, and can come and go at any
-time. The Controllers window assigns each to a controller port, and maps keys
-and buttons. With **Gamepad sticks steer the joystick** on (Preferences ▸
-Input), a gamepad's analog stick steers the joystick as its D-pad does. A
-gamepad's buttons can be given the console keys and fire in the Controllers
-window.
+time; a message shows when one comes or goes. A gamepad with no standard
+layout (a plain USB adapter) works too, through its raw buttons and hats.
+
+Each pad plays one controller port. **Automatic** gives the first pad port 1,
+the next port 2, and so on; choose **Port 1** to **Port 4** to fix it, in the
+Controllers window or in Preferences ▸ Input. A pad that is fixed to a port
+takes it: a pad left on *Automatic* then plays nothing if there is no port
+left for it, and so does a second pad fixed to the same port. A port the
+computer does not have (ports 3 and 4 on an XL or XE without MultiJoy4)
+cannot be chosen.
+
+A choice is remembered between runs (setting `pad_assign`), by the pad's id
+and name, so a pad that is unplugged and plugged in again gets its port back.
+Unplugging a pad lets go of everything it held, and a paddle it had turned
+goes back to idle.
+
+With **Gamepad sticks steer the joystick** on (Preferences ▸ Input), a
+gamepad's analog stick steers the joystick as its D-pad does. On a port with
+paddles, the left stick turns the first paddle and the right stick the second,
+and the south and east buttons are their fire buttons. A gamepad's other
+buttons can be given the console keys and fire in the Controllers window.
 
 ## Changing the controls
 
 The controls are changed in the Controllers window (<kbd>F9</kbd>): click
-**Map**, then click a joystick control or a console key (Reset, Option,
-Select, Start, Help, Break), then press the key or the gamepad button to give
-it. The control's old key or button is taken from it. **Defaults** puts every
-control back. The map is kept in the settings, and only what differs from the
+**Map**, then click a control in the picture (the stick's four directions, a
+joystick's fire button or a console key), then press the key or the gamepad
+button to give it. There are 30 controls in all: the four ports' joystick
+directions and fire, the six console keys (Option, Select, Start, Reset, Help
+and Break) and the system actions Power cycle, Reboot to CONFIG, Pause (stop in the
+Debugger) and Warp. The picture shows only what is plugged in, so the **list** next to the
+buttons names every one of them.
+
+- **Clear** takes the picked control's key and gamepad button away.
+- **Defaults** puts every control back.
+- **Show bindings** writes the key bound to each control on it.
+- <kbd>Escape</kbd> backs out of a pick; <kbd>F9</kbd>, <kbd>F11</kbd>,
+  <kbd>F12</kbd> and keys with <kbd>Ctrl</kbd> cannot be given to a control.
+
+A key does one thing, so a key given to a new control is taken from the old
+one, and the window says so. Paddles, mice, the Koala Pad and the other
+pointer devices follow the pointer and the analog sticks, so they have nothing
+to map. The map is kept in the settings, and only what differs from the
 defaults is written.
 
 <!-- context: controllers -->
 # Controllers window
 
-The Controllers window (<kbd>F9</kbd>) draws the Atari's keyboard for the
-computer you chose (HELP on the XL/XE, F1 to F4 on the 1200XL), the
-controller ports with what is plugged into each (a stick and fire for a
-joystick, two dials for paddles), the gamepads and their ports, and Map mode.
-It floats on its own at a fixed size. Whatever the Atari sees held lights up
-in the accent colour, whoever holds it: the host keyboard, a gamepad or the
-mouse, so the window is also an input tester for a new gamepad.
+The Controllers window (<kbd>F9</kbd>) draws what is plugged into each
+controller port, the console keys, and the Atari's keyboard, like the real
+things. It floats on its own at a fixed size, hidden until you ask for it.
+There are four ports on a 400 or 800 (and on an XL or XE with MultiJoy4), two
+on an XL or XE. Each port shows the device that Preferences ▸ Input says is in
+it:
+
+| Device | Drawn as |
+|---|---|
+| Joystick | The CX40: a stick in a ring, and the red fire button |
+| Paddles | The CX30 pair: a knob and a red button each |
+| Atari ST mouse | A two-button mouse, and a mat |
+| Amiga mouse | A two-button mouse, and a mat |
+| Trak-Ball (CX22) | The ball, with a button either side |
+| Koala Pad | The pad's surface and its two buttons |
+| Touch tablet (CX77) | The tablet's surface |
+| Numeric keypad (CX85) | Its seventeen keys, from 0 to 9 and YES and NO |
+| Light pen, Light gun | A note: *Aim on the picture* |
+
+Below the ports is the console: **Start**, **Select**, **Option**, **Reset**
+and **Break**, and **Help** on an XL or XE. The Atari's keyboard is drawn for
+the computer you chose: the 400's black membrane keys, the 800's brown keys
+on a beige case, and the XL and XE's charcoal keys with a round HELP key (the
+1200XL also has F1 to F4). The **Keyboard** check box shows or hides it, and
+the window remembers your choice (setting `controllers_keyboard`); until you
+choose, it starts shown or hidden to suit the machine and your screen.
+
+The controls that are held light up in orange, whoever holds them: the host
+keyboard, a gamepad or the mouse, so the window shows a gamepad working too.
 
 | With the mouse | Does |
 |---|---|
-| Press a key | Holds it for as long as the button is down |
+| Press a key or a button | Holds it for as long as the button is down |
 | Press Shift or Control | Latches it for the next key |
-| Press a stick control | Holds it |
-| Press a console key | Holds it |
+| Drag the joystick's ring | Tilts the stick towards the pointer; let go to centre |
+| Drag a paddle's knob | Turns it; it stays where you leave it |
+| Scroll over a knob | Nudges the paddle |
+| Press a paddle's turn arrow | Turns the paddle while held |
+| Drag on a mouse's mat | Moves the mouse |
+| Drag on the Trak-Ball | Rolls the ball |
+| Touch the Koala Pad or tablet | Puts the pen at that point |
+| Press a CX85 key | Holds it (YES and NO only here) |
 
 The Atari reads its keyboard and sticks once a frame, so a key is held for as
 long as the mouse button is, as a real one is. Switching to another window
-lets go of everything the mouse holds. Keys typed in the Controllers window go
-to the Atari. **Map** and **Defaults** change the controls (see
-[Changing the controls](#changing-the-controls)).
+lets go of everything the mouse and the keyboard hold, but not a gamepad. Keys
+typed in the Controllers window go to the Atari, except while **Map** waits
+for a key.
+
+The light pen and the light gun are aimed with the mouse over the Atari's own
+picture, not in this window.
+
+Under the picture are a row for each gamepad plugged in (*Automatic* or
+*Port 1* to *Port 4*, see [Gamepads](#gamepads)) and the **Map**, **Clear**,
+**Defaults** and **Show bindings** buttons with the list of all the controls
+(see [Changing the controls](#changing-the-controls)). A **Help** button opens
+this topic. The window can also be opened at start with the environment
+variable `A800_OPEN_CONTROLLERS` set.
 
 # Machines
 
@@ -577,6 +645,25 @@ What is in the controller ports, and how the sticks and the keyboard behave. App
 
 - **Keys**: *Characters (type what you see)* sends the character the host key makes; *Positions (like the Atari's own keys)* sends the Atari key in the same place (setting `kbd_mode`)
 
+### Gamepad ports
+
+- **Enable gamepads**: pick up gamepads at all. It is the same setting as the
+  one on the FujiNet page (`enable_gamepad`), so the two rows always agree; a
+  change restarts the session when Preferences closes.
+- A row for each gamepad plugged in, with the port it plays: *Automatic* or
+  *Port 1* to *Port 4*, applied at once (see [Gamepads](#gamepads)). The rows
+  follow gamepads plugged in and out while Preferences is open.
+
+### Controls buttons
+
+- **Reset Controls**: puts the default keys and gamepad buttons back, and every
+  gamepad on *Automatic*. It asks first.
+- **Open Controllers**: opens the Controllers window (see
+  [Controllers window](#controllers-window)).
+
+Preferences can be opened at start with `A800_OPEN_SETTINGS` set, on the Input
+page with `A800_OPEN_PREFS=Input` (GNOME) or `A800_SETTINGS_PAGE=Input` (KDE).
+
 The devices a controller port can hold: *Joystick*, *Paddles*, *Koala Pad*,
 *Atari ST mouse*, *Amiga mouse*, *Trak-Ball (CX22)*, *Light pen*, *Light gun
 (XG-1)*, *Touch tablet (CX77)*, *Numeric keypad (CX85)* and *Nothing*. A mouse
@@ -614,6 +701,11 @@ imported*, in groups, with import buttons (see [System ROMs](#system-roms)).
 The settings file is `settings.ini` (see [Files and folders](#files-and-folders)).
 Each setting above names its key. The keys are stored one per line, and a
 setting that has its default is still written once changed.
+
+The Controllers window keeps its own settings here too: `bindings` (the keys and
+gamepad buttons that differ from the defaults), `pad_assign` (the port each
+gamepad was given, by its id and name), `controllers_show_bindings` and
+`controllers_keyboard` (the two check boxes under the picture).
 
 # Debugger
 
@@ -745,7 +837,9 @@ In the data folder:
 - **Keys type the wrong characters**: Preferences ▸ Input ▸ Keys switches
   between typing characters and the Atari's key positions.
 - **A gamepad does nothing**: it may be on a port with no joystick, or its
-  buttons given other jobs in the Controllers window.
+  buttons given other jobs in the Controllers window. A gamepad that is *Automatic*
+  plays nothing when another pad is fixed to the port it would take: look at its
+  row in the Controllers window.
 - **No sound**: the audio device could not be opened (Preferences ▸ FujiNet ▸
   Sound output), or the volume is 0.
 - **A port is taken**: another program is using 11514 or 11515. Close the

@@ -24,9 +24,12 @@
       images or MAME's sets.
     </p>
     <p>
-      The Atari's keyboard, console keys and joysticks are on screen when
-      wanted, gamepads are picked up as they are plugged in and out, the mouse
-      drives paddles, the Koala Pad, mice and the light pen, and a native
+      A Controllers window draws the Atari's own hardware on screen when
+      wanted: the CX40 joystick, the CX30 paddles, the mice, Trak-Ball, Koala
+      Pad, touch tablet and CX85 keypad, the console keys and the keyboard of
+      the computer you chose (the light pen and gun are aimed on the picture).
+      Gamepads, including plain USB adapters, are
+      picked up as they are plugged in and out and assigned to ports, and a native
       debugger shows the 6502, disassembly with breakpoints and watchpoints,
       ANTIC and its display list, GTIA, POKEY, PIA, the memory map and every
       SIO command. Built-in, searchable Help covers all of it.
