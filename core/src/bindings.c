@@ -82,6 +82,13 @@ static uint32_t fold(uint32_t keysym)
     return keysym;
 }
 
+/* F9 (the Controllers window), F11 (full screen) and F12 (the debugger) are
+ * the frontends': never bindable, so no setting can take them from a window. */
+int a800session_key_reserved(uint32_t keysym)
+{
+    return keysym == A800_KEYSYM_F9 || keysym == A800_KEYSYM_F11 || keysym == A800_KEYSYM_F12;
+}
+
 /* ---- persistence ---------------------------------------------------------- */
 
 static void apply_persisted_locked(const char *packed)
@@ -92,7 +99,8 @@ static void apply_persisted_locked(const char *packed)
         const char *end = strchr(p, ' ');
         if (sscanf(p, "%d.%c:%ld", &target, &kind, &value) == 3
             && target >= 0 && target < A800_TARGET_COUNT) {
-            if (kind == 'k') s_table[target].keysym = (uint32_t)value;
+            if (kind == 'k') s_table[target].keysym =
+                a800session_key_reserved((uint32_t)value) ? 0 : (uint32_t)value;
             else if (kind == 'b') s_table[target].button = (int)value;
         }
         if (!end) break;
@@ -142,6 +150,15 @@ void bindings_init(struct a800session *s)
     s_store = s;
     if (s)
         apply_persisted_locked(a800session_get_str(s, "bindings", ""));
+    pthread_mutex_unlock(&s_lock);
+}
+
+/* The table is process-global; it must not keep saving into a session that has
+ * been freed. */
+void bindings_shutdown(struct a800session *s)
+{
+    pthread_mutex_lock(&s_lock);
+    if (s_store == s) s_store = NULL;
     pthread_mutex_unlock(&s_lock);
 }
 
@@ -222,8 +239,10 @@ void a800session_binding_set_key(a800session *s, int target, uint32_t keysym,
 {
     int victims[A800_TARGET_COUNT], nvictims = 0, t;
     (void)s;
+    if (stolen && stolensz > 0) stolen[0] = '\0';
     if (target < 0 || target >= A800_TARGET_COUNT) return;
     keysym = fold(keysym);
+    if (a800session_key_reserved(keysym)) return;
     pthread_mutex_lock(&s_lock);
     ensure_seeded_locked();
     if (keysym) {
@@ -264,6 +283,18 @@ void a800session_binding_set_button(a800session *s, int target, int button,
     persist_locked();
     pthread_mutex_unlock(&s_lock);
     describe_stolen(victims, nvictims, stolen, stolensz);
+}
+
+void a800session_binding_clear(a800session *s, int target)
+{
+    (void)s;
+    if (target < 0 || target >= A800_TARGET_COUNT) return;
+    pthread_mutex_lock(&s_lock);
+    ensure_seeded_locked();
+    s_table[target].keysym = 0;
+    s_table[target].button = A800_PAD_BTN_NONE;
+    persist_locked();
+    pthread_mutex_unlock(&s_lock);
 }
 
 void a800session_bindings_reset(a800session *s)

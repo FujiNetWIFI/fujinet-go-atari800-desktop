@@ -27,6 +27,106 @@ extern "C" {
 }
 
 // ---------------------------------------------------------------------------
+// sources: who holds what (input_merge.h)
+// ---------------------------------------------------------------------------
+
+unsigned SessionImpl::MergedJoy(int port) const
+{
+	unsigned b = 0;
+	if (port < 0 || port >= A800_PORTS)
+		return 0;
+	for (int i = 0; i < A800_SRC_COUNT; i++)
+		b |= joySrc[port][i].load(std::memory_order_relaxed);
+	// a CX40's switches cannot close both ways: opposed directions are neither
+	const unsigned ud = (1u << A800_ACT_UP) | (1u << A800_ACT_DOWN);
+	const unsigned lr = (1u << A800_ACT_LEFT) | (1u << A800_ACT_RIGHT);
+	if ((b & ud) == ud)
+		b &= ~ud;
+	if ((b & lr) == lr)
+		b &= ~lr;
+	return b;
+}
+
+unsigned SessionImpl::MergedConsole() const
+{
+	unsigned b = 0;
+	for (int i = 0; i < A800_SRC_COUNT; i++)
+		b |= conSrc[i].load(std::memory_order_relaxed);
+	return b;
+}
+
+unsigned SessionImpl::MergedPaddleFire() const
+{
+	unsigned b = 0;
+	for (int i = 0; i < A800_SRC_COUNT; i++)
+		b |= fireSrc[i].load(std::memory_order_relaxed);
+	return b;
+}
+
+extern "C" void input_press(struct a800session* s, int src, int target, int down)
+{
+	SessionImpl* im = Impl(s);
+	if (src < 0 || src >= A800_SRC_COUNT || target < 0 || target >= A800_TARGET_SYSACT(0))
+		return;
+	std::atomic<unsigned>* word;
+	unsigned bit;
+	if (target < A800_TARGET_CONSOLE(0)) {
+		word = &im->joySrc[target / A800_ACT_PER_PORT][src];
+		bit = 1u << (target % A800_ACT_PER_PORT);
+	}
+	else {
+		word = &im->conSrc[src];
+		bit = 1u << (target - A800_TARGET_CONSOLE(0));
+	}
+	if (down)
+		word->fetch_or(bit);
+	else
+		word->fetch_and(~bit);
+}
+
+extern "C" void input_pad_clear(struct a800session* s, int owner)
+{
+	SessionImpl* im = Impl(s);
+	if (owner < 0 || owner >= A800_MAX_PADS)
+		return;
+	const int srcs[2] = { A800_SRC_PAD(owner), A800_SRC_STICK(owner) };
+	for (int k = 0; k < 2; k++) {
+		for (int p = 0; p < A800_PORTS; p++)
+			im->joySrc[p][srcs[k]].store(0);
+		im->conSrc[srcs[k]].store(0);
+		im->fireSrc[srcs[k]].store(0);
+	}
+	// a paddle the pad was turning goes back to what a paddle that is not there reads
+	for (int line = 0; line < 8; line++) {
+		int own = A800_SRC_STICK(owner);
+		if (im->potSrc[line].compare_exchange_strong(own, -1))
+			im->pot[line].store(A800_POT_IDLE);
+	}
+}
+
+extern "C" void input_pot(struct a800session* s, int src, int port, int paddle, int value)
+{
+	SessionImpl* im = Impl(s);
+	if (port < 0 || port >= A800_PORTS || paddle < 0 || paddle > 1)
+		return;
+	const int line = port * 2 + paddle;
+	im->pot[line].store(std::max(0, std::min(A800_POT_MAX, value)));
+	im->potSrc[line].store(src);
+}
+
+extern "C" void input_pot_fire(struct a800session* s, int src, int port, int paddle, int down)
+{
+	SessionImpl* im = Impl(s);
+	if (src < 0 || src >= A800_SRC_COUNT || port < 0 || port >= A800_PORTS || paddle < 0 || paddle > 1)
+		return;
+	const unsigned bit = 1u << (port * 2 + paddle);
+	if (down)
+		im->fireSrc[src].fetch_or(bit);
+	else
+		im->fireSrc[src].fetch_and(~bit);
+}
+
+// ---------------------------------------------------------------------------
 // controller ports
 // ---------------------------------------------------------------------------
 
@@ -97,12 +197,21 @@ void SessionImpl::DevicesBeforeFrame()
 {
 	unsigned buttons = ptrButtons.load();
 	bool direct = false;
+	const unsigned fire = MergedPaddleFire();
+	// the window's turn arrows: a held arrow keeps turning (228 is full left)
+	for (int line = 0; line < 8; line++) {
+		int dir = turnDir[line].load();
+		if (dir != 0) {
+			pot[line].store(std::max(0, std::min(A800_POT_MAX, pot[line].load() - dir * TurnStep)));
+			potSrc[line].store(A800_SRC_POINTER);
+		}
+	}
 	for (int p = 0; p < A800_PORTS; p++) {
 		int d = portDevice[p].load();
 		if (d == A800_DEV_PADDLES || d == A800_DEV_KOALA || d == A800_DEV_TOUCH_TABLET)
 			direct = true;
 		if (d == A800_DEV_PADDLES) {
-			unsigned f = paddleFire.load() >> (p * 2);
+			unsigned f = fire >> (p * 2);
 			// the paddles' triggers are the stick's left and right lines
 			unsigned char stick = INPUT_STICK_CENTRE;
 			if (f & 1)
@@ -138,7 +247,13 @@ void SessionImpl::DevicesBeforeFrame()
 	switch (INPUT_mouse_mode) {
 	case INPUT_MOUSE_KOALA:
 	case INPUT_MOUSE_TOUCH:
-		if (inside) {
+		if (ptrNorm.load() && ptrInside.load()) {
+			// the pad drawn in the window: a point of its surface, 0..1 each way
+			int x = ptrU.load() * A800_POT_MAX / 1000, y = ptrV.load() * A800_POT_MAX / 1000;
+			POKEY_POT_input[port * 2] = (UBYTE)std::max(1, std::min(A800_POT_MAX, x));
+			POKEY_POT_input[port * 2 + 1] = (UBYTE)std::max(1, std::min(A800_POT_MAX, y));
+		}
+		else if (inside) {
 			// the pad's 228 x 228 surface over the 320 x 192 playfield
 			int x = (sx - 32) * 228 / 320, y = (sy - 24) * 228 / 192;
 			POKEY_POT_input[port * 2] = (UBYTE)std::max(1, std::min(228, x));
@@ -163,24 +278,66 @@ void SessionImpl::DevicesBeforeFrame()
 	}
 }
 
+// The window's pointer is the source here (a gamepad has its own, input_merge.h).
 void a800session_paddle(a800session* s, int port, int paddle, int value, int fire)
+{
+	input_pot(s, A800_SRC_POINTER, port, paddle, value);
+	input_pot_fire(s, A800_SRC_POINTER, port, paddle, fire);
+}
+
+void a800session_paddle_pointer(a800session* s, int port, int paddle, int value, int active)
 {
 	SessionImpl* im = Impl(s);
 	if (port < 0 || port >= A800_PORTS || paddle < 0 || paddle > 1)
 		return;
-	int line = port * 2 + paddle;
-	im->pot[line].store(std::max(0, std::min(228, value)));
-	if (fire)
-		im->paddleFire.fetch_or(1u << line);
-	else
-		im->paddleFire.fetch_and(~(1u << line));
+	if (active) {
+		input_pot(s, A800_SRC_POINTER, port, paddle, value);
+		return;
+	}
+	// the drag ended: the position stays, nobody holds it any more
+	int own = A800_SRC_POINTER;
+	im->potSrc[port * 2 + paddle].compare_exchange_strong(own, -1);
+}
+
+void a800session_paddle_fire(a800session* s, int port, int paddle, int down)
+{
+	input_pot_fire(s, A800_SRC_POINTER, port, paddle, down);
+}
+
+void a800session_paddle_turn(a800session* s, int port, int paddle, int dir)
+{
+	SessionImpl* im = Impl(s);
+	if (port < 0 || port >= A800_PORTS || paddle < 0 || paddle > 1)
+		return;
+	im->turnDir[port * 2 + paddle].store(dir < 0 ? -1 : dir > 0 ? 1 : 0);
+}
+
+int a800session_paddle_value(a800session* s, int port, int paddle)
+{
+	SessionImpl* im = Impl(s);
+	if (port < 0 || port >= A800_PORTS || paddle < 0 || paddle > 1)
+		return A800_POT_IDLE;
+	return im->pot[port * 2 + paddle].load();
 }
 
 void a800session_pointer(a800session* s, int x, int y, int inside, unsigned buttons)
 {
 	SessionImpl* im = Impl(s);
+	im->ptrNorm.store(0);
 	im->ptrX.store(x);
 	im->ptrY.store(y);
+	im->ptrInside.store(inside);
+	im->ptrButtons.store(buttons);
+}
+
+void a800session_pointer_norm(a800session* s, float u, float v, int inside, unsigned buttons)
+{
+	SessionImpl* im = Impl(s);
+	u = std::max(0.0f, std::min(1.0f, u));
+	v = std::max(0.0f, std::min(1.0f, v));
+	im->ptrU.store((int)(u * 1000.0f + 0.5f));
+	im->ptrV.store((int)(v * 1000.0f + 0.5f));
+	im->ptrNorm.store(1);
 	im->ptrInside.store(inside);
 	im->ptrButtons.store(buttons);
 }
@@ -195,13 +352,24 @@ void a800session_pointer_motion(a800session* s, int dx, int dy, unsigned buttons
 	for (int p = 0; p < A800_PORTS; p++)
 		if (im->PortDevice(p) == A800_DEV_PADDLES) {
 			int v = im->pot[p * 2].load() - dx * im->mouseSpeed.load() / 2;
-			im->pot[p * 2].store(std::max(0, std::min(228, v)));
-			if (buttons & 1)
-				im->paddleFire.fetch_or(1u << (p * 2));
-			else
-				im->paddleFire.fetch_and(~(1u << (p * 2)));
+			input_pot(s, A800_SRC_POINTER, p, 0, v);
+			input_pot_fire(s, A800_SRC_POINTER, p, 0, buttons & 1);
 			break;
 		}
+}
+
+// The joystick drag: the pointer's hold on the four directions (fire is a
+// part of its own, a800session_press).
+void a800session_pointer_set(a800session* s, int port, unsigned mask)
+{
+	SessionImpl* im = Impl(s);
+	if (port < 0 || port >= A800_PORTS)
+		return;
+	const unsigned dirs = (1u << A800_ACT_UP) | (1u << A800_ACT_DOWN)
+	                      | (1u << A800_ACT_LEFT) | (1u << A800_ACT_RIGHT);
+	std::atomic<unsigned>& w = im->joySrc[port][A800_SRC_POINTER];
+	unsigned cur = w.load();
+	while (!w.compare_exchange_weak(cur, (cur & ~dirs) | (mask & dirs))) {}
 }
 
 int a800session_pointer_device_active(a800session* s)
@@ -289,6 +457,16 @@ constexpr int N_OSK = (int)(sizeof osk_keys / sizeof osk_keys[0]);
 
 } // namespace
 
+int a800session_keyboard_family(a800session* s)
+{
+	const int m = prefs_machine(s);
+	if (m == A800_M_400)
+		return A800_KBD_400;
+	if (m == A800_M_800)
+		return A800_KBD_800;
+	return m == A800_M_1200XL ? A800_KBD_1200XL : A800_KBD_XL;
+}
+
 int a800session_keyboard_layout(a800session* s, const a800_kbd_key** keys)
 {
 	static a800_kbd_key out[N_OSK];
@@ -308,6 +486,25 @@ int a800session_keyboard_layout(a800session* s, const a800_kbd_key** keys)
 		out[n].y = k.y;
 		out[n].w = k.w;
 		out[n].h = 1.0f;
+		out[n].console = -1;
+		switch (k.kind) {
+		case K_CONSOLE: out[n].kind = A800_KEY_CONSOLE; out[n].console = k.code; break;
+		case K_BREAK: out[n].kind = A800_KEY_BREAK; out[n].console = A800_CON_BREAK; break;
+		case K_SHIFT: out[n].kind = A800_KEY_SHIFT; break;
+		case K_CTRL: out[n].kind = A800_KEY_CTRL; break;
+		default:
+			if (k.code == AKEY_CAPSTOGGLE)
+				out[n].kind = A800_KEY_CAPS;
+			else if (k.code == AKEY_SPACE)
+				out[n].kind = A800_KEY_SPACE;
+			else if (k.code == AKEY_F1 || k.code == AKEY_F2 || k.code == AKEY_F3 || k.code == AKEY_F4)
+				out[n].kind = A800_KEY_FUNCTION;
+			else if (k.code == AKEY_ATARI)
+				out[n].kind = A800_KEY_ATARI;
+			else
+				out[n].kind = A800_KEY_NORMAL;
+			break;
+		}
 		n++;
 	}
 	*keys = out;
@@ -368,8 +565,8 @@ int a800session_keyboard_held(a800session* s, int index)
 	switch (k.kind) {
 	case K_SHIFT: return (osk_latch.load() & 1) || im->modShift;
 	case K_CTRL: return (osk_latch.load() & 2) || im->modCtrl;
-	case K_CONSOLE: return (im->console.load() >> k.code) & 1;
-	case K_BREAK: return (im->console.load() >> A800_CON_BREAK) & 1;
+	case K_CONSOLE: return (im->MergedConsole() >> k.code) & 1;
+	case K_BREAK: return (im->MergedConsole() >> A800_CON_BREAK) & 1;
 	default: break;
 	}
 	if (osk_down.load() == index)

@@ -65,6 +65,7 @@ add_custom_command(
 set(A800_SESSION_C_SOURCES
   src/settings.c src/paths.c src/prefs.c src/roms.c src/zipread.c src/keymap.c
   src/bindings.c src/hid_keys.c src/audio_sdl.c src/gamepad_sdl.c src/fujinet_runtime.c
+  src/pad_assign.c src/controls.c
   src/fujinet_api.c src/fuji_trace.c src/help.c
   "${A800_ROMS_C}" "${A800_HELP_C}")
 set(A800_SESSION_CXX_SOURCES src/session.cpp src/input.cpp src/media.cpp src/debug.cpp)

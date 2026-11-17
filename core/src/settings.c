@@ -46,7 +46,7 @@ static void set_locked(struct a800session *s, const char *key, const char *val)
 void settings_init(struct a800session *s)
 {
     FILE *fp;
-    char line[1024];
+    char line[16384];   /* pad_assign alone can run to several KB */
 
     pthread_mutex_init(&s->settings_mtx, NULL);
     fp = fopen(s->settings_file, "r");

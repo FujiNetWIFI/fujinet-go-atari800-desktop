@@ -205,12 +205,27 @@ typedef enum {
 const char *a800_target_name(int target);       /* "Joystick 1: Up" */
 const char *a800_target_short_name(int target); /* "Up" */
 
+/* Every way of holding a target is a separate source (the host keyboard, the
+ * Controllers window's pointer, each gamepad's buttons and stick), merged by
+ * the session: a target is held while any source holds it, opposed joystick
+ * directions cancel, and one source letting go never releases another.
+ *   a800session_press / _console   the window's POINTER source (a part of the
+ *                                  window held with the mouse); a system action
+ *                                  runs on the press (UI thread)
+ *   a800session_key                the KEYBOARD source
+ *   a800session_release_all        lets go of the keyboard and the pointer (focus
+ *                                  loss); a gamepad is left alone */
 void a800session_press(a800session *s, int target, int down);
 void a800session_console(a800session *s, int console, int down);
 void a800session_sysaction(a800session *s, int sysact);
 void a800session_release_all(a800session *s);
-unsigned a800session_buttons_held(a800session *s, int port);  /* 1 << a800_action */
-unsigned a800session_console_held(a800session *s);            /* 1 << a800_console */
+/* What is held now, every source merged (so the window is a gamepad tester):
+ * the joystick's actions (1 << a800_action, opposed directions cancelled) and
+ * the console keys (1 << a800_console). */
+unsigned a800session_buttons_held(a800session *s, int port);
+unsigned a800session_console_held(a800session *s);
+/* The ports the machine has: 4 on a 400/800 (or an XL with multijoy), else 2. */
+int a800session_active_ports(a800session *s);
 
 /* What is plugged into each port (Preferences "port1_device" ...). */
 typedef enum {
@@ -229,6 +244,51 @@ void a800session_paddle(a800session *s, int port, int paddle, int value, int fir
 void a800session_pointer(a800session *s, int x, int y, int inside, unsigned buttons);
 void a800session_pointer_motion(a800session *s, int dx, int dy, unsigned buttons);
 int  a800session_pointer_device_active(a800session *s);  /* a mouse-type device fitted */
+
+/* ---- the Controllers window's own input ------------------------------------
+ * The joystick drag: the pointer's hold on the four directions of `port`
+ * (bits of 1 << A800_ACT_UP..RIGHT; fire is a part of its own, a800session_press).
+ * 0 lets go. Feed it a800session_stick_from_vector on every move. */
+void a800session_pointer_set(a800session *s, int port, unsigned mask);
+/* The direction bits for a pointer at (dx, dy) from the stick's centre (+x
+ * right, +y down, any unit) with `radius` the stick's reach: nothing inside a
+ * quarter of it, else one of eight 45-degree sectors. */
+unsigned a800session_stick_from_vector(float dx, float dy, float radius);
+
+/* A paddle's knob: a drag sets its position (A800_PADDLE_MAX = full left ..
+ * 0 = full right, as the POT counters read; centre A800_PADDLE_CENTRE),
+ * active 0 ends the drag and the position stays. The knob turns
+ * +-A800_KNOB_TRAVEL_DEG from straight up (clockwise is right, a lower value). */
+#define A800_PADDLE_MAX     228
+#define A800_PADDLE_CENTRE  114
+#define A800_KNOB_TRAVEL_DEG 135.0f
+void a800session_paddle_pointer(a800session *s, int port, int paddle, int value, int active);
+int  a800session_paddle_value(a800session *s, int port, int paddle);   /* where it is: draw the knob here */
+int  a800session_knob_from_vector(float dx, float dy);                 /* pointer at (dx, dy) from the knob's centre -> value */
+float a800session_knob_angle(int value);        /* degrees clockwise from straight up for a value */
+float a800session_vector_angle(float dx, float dy);   /* a pointer's angle from straight up, -180..180 */
+/* The fire button of paddle 0/1 of the pair on `port` (the window's pointer source). */
+void a800session_paddle_fire(a800session *s, int port, int paddle, int down);
+/* A held turn arrow keeps turning the knob: dir -1 left (counter-clockwise), +1
+ * right, 0 stops. Roughly one second across the travel. */
+void a800session_paddle_turn(a800session *s, int port, int paddle, int dir);
+
+/* An absolute device's pad drawn in the window (Koala Pad, touch tablet): a
+ * point of its surface, u and v 0..1 from its top-left, same buttons as
+ * a800session_pointer. The latest of this and a800session_pointer wins; inside 0
+ * lets go. */
+void a800session_pointer_norm(a800session *s, float u, float v, int inside, unsigned buttons);
+
+/* The CX85 numeric keypad's keys, for a pad drawn in the window (the host
+ * keyboard's numeric keypad reaches it through a800session_key). */
+typedef enum {
+    A800_CX85_0 = 0, A800_CX85_1, A800_CX85_2, A800_CX85_3, A800_CX85_4, A800_CX85_5,
+    A800_CX85_6, A800_CX85_7, A800_CX85_8, A800_CX85_9,
+    A800_CX85_PERIOD, A800_CX85_MINUS, A800_CX85_PLUS_ENTER, A800_CX85_ESCAPE,
+    A800_CX85_DELETE, A800_CX85_YES, A800_CX85_NO,
+    A800_CX85_COUNT
+} a800_cx85_key;
+void a800session_cx85_key(a800session *s, int key, int down);   /* a CX85 must be fitted */
 
 /* ---- the keyboard ------------------------------------------------------------
  * keysym: X11-style (below); unicode: the character the host keyboard
@@ -272,12 +332,30 @@ uint32_t a800session_keysym_from_macos_keycode(unsigned keycode);
 int a800session_keysym_name(uint32_t keysym, char *dst, int dstsz);
 
 /* The on-screen keyboard, drawn by every frontend from this table. */
+typedef enum {
+    A800_KEY_NORMAL = 0,
+    A800_KEY_CONSOLE,       /* RESET OPTION SELECT START HELP: `console` says which */
+    A800_KEY_BREAK,
+    A800_KEY_SHIFT,         /* latches */
+    A800_KEY_CTRL,          /* latches */
+    A800_KEY_CAPS,
+    A800_KEY_SPACE,
+    A800_KEY_FUNCTION,      /* the 1200XL's F1-F4 */
+    A800_KEY_ATARI          /* the inverse-video key */
+} a800_kbd_kind;
 typedef struct {
     const char *label;      /* "Q", "RETURN", "\xe2\x86\x90" ... (UTF-8) */
     const char *shifted;    /* label of the shifted character, or NULL */
     int index;              /* for _keyboard_press / _held */
     float x, y, w, h;       /* key units from the top left */
+    int kind;               /* a800_kbd_kind */
+    int console;            /* a800_console for A800_KEY_CONSOLE / BREAK, else -1 */
 } a800_kbd_key;
+/* Which family of machine's keyboard to draw: the 400's membrane, the 800's
+ * brown keys, the XL/XE's charcoal ones (HELP is a key there), the 1200XL's
+ * (those, plus F1-F4). The table itself is 16.0 x 6.0 key units for all. */
+typedef enum { A800_KBD_400 = 0, A800_KBD_800, A800_KBD_XL, A800_KBD_1200XL } a800_kbd_family;
+int  a800session_keyboard_family(a800session *s);
 int  a800session_keyboard_layout(a800session *s, const a800_kbd_key **keys);
 void a800session_keyboard_press(a800session *s, int index, int down);
 int  a800session_keyboard_held(a800session *s, int index);
@@ -319,6 +397,11 @@ void a800session_binding_set_key(a800session *s, int target, uint32_t keysym,
 void a800session_binding_set_button(a800session *s, int target, int button,
                                     char *stolen, int stolensz);
 void a800session_bindings_reset(a800session *s);
+/* The window's Clear: the target's key AND its pad button. */
+void a800session_binding_clear(a800session *s, int target);
+/* F9, F11 and F12 are the frontends' (Controllers window, full screen,
+ * debugger): never bindable. 1 if the keysym is one of them. */
+int  a800session_key_reserved(uint32_t keysym);
 const char *a800_pad_button_name(int button);
 int  a800session_target_for_key(a800session *s, uint32_t keysym);
 int  a800session_target_for_button(a800session *s, int port, int button);
@@ -338,6 +421,69 @@ int  a800session_gamepad_last_event(a800session *s, char *dst, int dstsz);
 /* Cross-thread system actions (the gamepad thread posts; a UI timer takes). */
 void a800session_sysaction_post(a800session *s, int sysact);
 int  a800session_sysaction_take(a800session *s, int *out);
+
+/* ---- the Controllers window's layout ------------------------------------------
+ * One table says what the window draws and where (layout units: 1.0 = a keypad
+ * key's width, from the top left), so the toolkits cannot drift apart: they draw
+ * the art from it (DESIGN-atari.md: the CX40 case is 8.0 x 8.0, a CX30 paddle
+ * 7.0 x 6.0) and ask a800session_controls_hit what a click landed on. Each port
+ * shows what is plugged into it (joystick, paddles, a mouse, the Koala Pad, ...)
+ * in a grid (2 x 2 for four ports, a row for two), over a console strip. The
+ * extent depends only on the number of ports. The joystick and paddle parts are
+ * the same drawing as the Atari 2600's.
+ *
+ * What each kind is driven with (target, arg, dir per part):
+ *   STICK          round; drag: a800session_pointer_set(port,
+ *                  a800session_stick_from_vector(dx, dy, w/2)); 0 on release
+ *   ROUND_BUTTON   round; the joystick's fire: a800session_press(target, down)
+ *   KNOB           round; arg = paddle 0/1: drag a800session_paddle_pointer(port,
+ *                  arg, a800session_knob_from_vector(dx, dy), 1), then
+ *                  (.., 0, 0); the wheel nudges a800session_paddle_value
+ *   PADDLE_FIRE    arg = paddle: a800session_paddle_fire(port, arg, down)
+ *   TURN           arg = paddle, dir = -1 left / +1 right: a800session_paddle_turn
+ *                  (port, arg, dir) on the press, (.., 0) on the release
+ *   CONSOLE_KEY    target = A800_TARGET_CONSOLE(c): a800session_press(target, down)
+ *   POINTER_BUTTON arg = bit (1 left / trigger, 2 right): keep the mask of held
+ *                  ones and send a800session_pointer_motion(0, 0, mask)
+ *   MAT            a relative device's drag area (mice): deltas from the drag to
+ *                  a800session_pointer_motion(dx, dy, mask)
+ *   BALL           round; the Trak-Ball's ball, same calls as MAT
+ *   PAD            an absolute device's surface (Koala Pad, touch tablet): the
+ *                  point in 0..1 of the part to a800session_pointer_norm(u, v,
+ *                  1, mask), inside 0 on release (the tablet's touch is bit 1)
+ *   CX85_KEY       arg = a800_cx85_key: a800session_cx85_key(arg, down)
+ *   NOTE           text only ("Aim on the picture": the light pen and gun aim
+ *                  over the main display with a800session_pointer)
+ *   CAPTION, BODY  drawn only, never hit; `label` names them ("Joystick",
+ *                  "Paddle A", "Atari ST mouse", "Koala Pad", ...) */
+typedef enum {
+    A800_CTL_CAPTION = 0, A800_CTL_BODY, A800_CTL_STICK, A800_CTL_ROUND_BUTTON,
+    A800_CTL_KNOB, A800_CTL_PADDLE_FIRE, A800_CTL_TURN, A800_CTL_CONSOLE_KEY,
+    A800_CTL_POINTER_BUTTON, A800_CTL_MAT, A800_CTL_BALL, A800_CTL_PAD,
+    A800_CTL_CX85_KEY, A800_CTL_NOTE
+} a800_control_kind;
+
+typedef struct {
+    int kind;            /* a800_control_kind */
+    const char *label;   /* "FIRE", "START", "ESCAPE", or a body's name */
+    const char *legend;  /* a hint ("turn left"), or NULL */
+    int port;            /* 0-3, or -1 for the console strip */
+    int target;          /* binding target (A800_TARGET_*), or -1 */
+    int arg;             /* a paddle, a button bit or a CX85 key, per kind */
+    int dir;             /* TURN: -1 / +1 */
+    float x, y, w, h;
+} a800_control;
+
+#define A800_CONTROLS_MAX 128
+/* Fills `out` (at most `max`) for `nports` ports whose devices are devices[0..]
+ * (a800_device; anything unknown is drawn as nothing); xl: the machine has a HELP
+ * key. Returns the part count (parts are in draw order); *width and *height are
+ * the extent. Pass a800session_port_device for each port. */
+int a800session_controls_layout(const int *devices, int nports, int xl,
+                                a800_control *out, int max, float *width, float *height);
+/* The topmost pressable part under a point in layout units, as an index into
+ * `c`, or -1. Round parts are ellipses; bodies, captions and notes are never hit. */
+int a800session_controls_hit(const a800_control *c, int n, float x, float y);
 
 /* ---- media ------------------------------------------------------------------ */
 typedef enum {

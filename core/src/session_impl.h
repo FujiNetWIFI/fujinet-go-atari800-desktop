@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "A800Host.h"
+#include "input_merge.h"
 #include "session_internal.h"
 
 struct SessionImpl
@@ -47,28 +48,38 @@ struct SessionImpl
 	void OnLog(const char* text);
 	bool suppressReset = false;
 
-	// ---- joysticks, console keys
-	std::atomic<unsigned> joy[A800_PORTS];      // frontends, keyboard bindings
-	std::atomic<unsigned> joyPad[A800_PORTS];   // gamepads
-	std::atomic<unsigned> console { 0 };
+	// ---- joysticks, console keys: one hold per SOURCE (input_merge.h), merged
+	std::atomic<unsigned> joySrc[A800_PORTS][A800_SRC_COUNT];   // bit per a800_action
+	std::atomic<unsigned> conSrc[A800_SRC_COUNT];               // bit per a800_console
+	unsigned MergedJoy(int port) const;         // all sources, opposed pairs cancelled
+	unsigned MergedConsole() const;             // all sources
 	bool resetHeld = false;
 	int PortDevice(int port);
 	std::atomic<int> portDevice[A800_PORTS] = { {0}, {0}, {0}, {0} };
 
-	// paddles: 0..228 per POT line, fire per port; from gamepads or the API
-	std::atomic<int> pot[8] = { {228}, {228}, {228}, {228}, {228}, {228}, {228}, {228} };
-	std::atomic<unsigned> paddleFire { 0 };     // bit per POT line
+	// paddles: 0..A800_POT_MAX per POT line, fire per source; from gamepads or the API
+	std::atomic<int> pot[8] = { {A800_POT_IDLE}, {A800_POT_IDLE}, {A800_POT_IDLE}, {A800_POT_IDLE},
+	                            {A800_POT_IDLE}, {A800_POT_IDLE}, {A800_POT_IDLE}, {A800_POT_IDLE} };
+	std::atomic<int> potSrc[8];                 // the source that wrote the line last, -1 none
+	std::atomic<unsigned> fireSrc[A800_SRC_COUNT];   // paddle fire, bit per POT line
+	std::atomic<int> turnDir[8];                // the window's turn arrows: -1 left, 0, +1 right
+	unsigned MergedPaddleFire() const;
 	// the pointer for mice, Koala Pad, light pen and gun
 	std::atomic<int> ptrX { 0 }, ptrY { 0 }, ptrInside { 0 };
 	std::atomic<unsigned> ptrButtons { 0 };
 	std::atomic<int> ptrDx { 0 }, ptrDy { 0 };
 	std::atomic<int> mouseSpeed { 3 };
+	// an absolute device's pad drawn in the window: a point of its surface (0..1)
+	std::atomic<int> ptrNorm { 0 };             // 1: ptrU/ptrV are the position (else ptrX/ptrY)
+	std::atomic<int> ptrU { 0 }, ptrV { 0 };    // thousandths
 
 	// ---- the keyboard
 	struct Held { uint32_t keysym; int akey; };
 	std::mutex keyMtx;
 	std::vector<Held> held;
 	int modShift = 0, modCtrl = 0;
+	uint32_t heldKeysym[A800_TARGET_COUNT] = {};   // keyMtx: the key that holds each target,
+	                                               // so its release lets go whatever it is bound to now
 	std::atomic<int> keyCode { -1 };
 	std::atomic<int> keyShift { 0 };
 	std::atomic<bool> positional { false };
@@ -77,6 +88,7 @@ struct SessionImpl
 	int oskFrames = 0;                          // pasteMtx: frames it has been seen
 	bool oskUp = false;                         // pasteMtx: let go, held for its frames
 	static constexpr int KeyMinFrames = 3;
+	static constexpr int TurnStep = 3;          // POT counts per frame a turn arrow is held
 	std::atomic<int> keyFrames { 0 };           // frames the key has been seen
 	std::atomic<int> tapCode { -1 }, tapShift { 0 }, tapLeft { 0 };
 	void UpdateKey();

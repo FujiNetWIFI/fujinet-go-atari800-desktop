@@ -77,6 +77,11 @@ struct a800session {
 
     pthread_mutex_t pad_event_mtx;
     char pad_event[128];
+    /* the pad generation, carried across gamepad_stop/start so a restart of the
+     * session never replays an old toast; and whether a pad thread has run
+     * before (its first scan then finds the same pads again: no hot-plug) */
+    unsigned pad_gen_base;
+    int pad_restarted;
 };
 
 void settings_init(struct a800session *s);
@@ -118,7 +123,6 @@ int  audio_start(struct a800session *s);
 void audio_stop(struct a800session *s);
 int  gamepad_start(struct a800session *s);
 void gamepad_stop(struct a800session *s);
-void session_gamepad_apply(struct a800session *s, int port, int act, int down);
 void session_gamepad_event(struct a800session *s, const char *text);
 int  session_active_ports(struct a800session *s);
 

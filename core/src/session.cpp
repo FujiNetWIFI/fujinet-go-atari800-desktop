@@ -19,6 +19,7 @@
 #include "A800Host.h"
 #include "session_impl.h"
 #include "session_internal.h"
+#include "bindings.h"
 #include "keymap.h"
 
 extern "C" {
@@ -94,6 +95,7 @@ a800session* a800session_new(const a800session_paths* paths)
 		snprintf(s->fujinet_runtime_src, sizeof s->fujinet_runtime_src, "%s",
 		         paths->fujinet_runtime_src);
 	settings_init(s);
+	bindings_init(s);   // the saved key and pad bindings, and where new ones are saved
 	s->impl = new SessionImpl(s);
 	roms_provision_embedded(s);
 	return s;
@@ -111,6 +113,7 @@ void a800session_free(a800session* s)
 		Impl(s)->coreUp = false;
 	}
 	delete Impl(s);
+	bindings_shutdown(s);   // no binding may be saved into a session that is gone
 	a800session_settings_flush(s);
 	settings_free_all(s);
 	pthread_mutex_destroy(&s->sysact_mtx);
@@ -360,7 +363,7 @@ void SessionImpl::RemountMedia()
 void SessionImpl::BeforeFrame()
 {
 	for (int p = 0; p < A800_PORTS; p++) {
-		unsigned b = joy[p].load() | joyPad[p].load();
+		unsigned b = MergedJoy(p);
 		unsigned char stick = INPUT_STICK_CENTRE;
 		if (b & (1u << A800_ACT_UP))
 			stick &= ~1;
@@ -377,7 +380,7 @@ void SessionImpl::BeforeFrame()
 	}
 	DevicesBeforeFrame();
 
-	unsigned con = console.load() | pasteConsole;
+	unsigned con = MergedConsole() | pasteConsole;
 	int consol = INPUT_CONSOL_NONE;
 	if (con & (1u << A800_CON_START))
 		consol &= ~INPUT_CONSOL_START;
@@ -434,10 +437,17 @@ void SessionImpl::OnLog(const char* text)
 
 SessionImpl::SessionImpl(a800session* sess) : s(sess)
 {
-	for (auto& j : joy)
-		j.store(0);
-	for (auto& j : joyPad)
-		j.store(0);
+	for (auto& port : joySrc)
+		for (auto& j : port)
+			j.store(0);
+	for (auto& c : conSrc)
+		c.store(0);
+	for (auto& f : fireSrc)
+		f.store(0);
+	for (auto& p : potSrc)
+		p.store(-1);
+	for (auto& t : turnDir)
+		t.store(0);
 	A800Host::Callbacks cb;
 	cb.init = [this](std::string& err) { return CoreReinit(err); };
 	cb.applyConfig = [this] { prefs_emit_options(s, apply_option, nullptr); };
@@ -745,35 +755,24 @@ void a800session_set_volume(a800session* s, int percent)
 // input
 // ---------------------------------------------------------------------------
 
+// The window's pointer is a source of its own (input_merge.h): the keyboard
+// (a800session_key) and every gamepad are others, so one letting go never
+// cancels another's hold.
 void a800session_press(a800session* s, int target, int down)
 {
-	SessionImpl* im = Impl(s);
 	if (target < 0 || target >= A800_TARGET_COUNT)
 		return;
-	if (target < A800_TARGET_CONSOLE(0)) {
-		int port = target / A800_ACT_PER_PORT, act = target % A800_ACT_PER_PORT;
-		if (down)
-			im->joy[port].fetch_or(1u << act);
-		else
-			im->joy[port].fetch_and(~(1u << act));
-	}
-	else if (target < A800_TARGET_SYSACT(0)) {
-		a800session_console(s, target - A800_TARGET_CONSOLE(0), down);
-	}
-	else if (down) {
+	if (target < A800_TARGET_SYSACT(0))
+		input_press(s, A800_SRC_POINTER, target, down);
+	else if (down)
 		a800session_sysaction(s, target - A800_TARGET_SYSACT(0));
-	}
 }
 
 void a800session_console(a800session* s, int c, int down)
 {
-	SessionImpl* im = Impl(s);
 	if (c < 0 || c >= A800_CON_COUNT)
 		return;
-	if (down)
-		im->console.fetch_or(1u << c);
-	else
-		im->console.fetch_and(~(1u << c));
+	input_press(s, A800_SRC_POINTER, A800_TARGET_CONSOLE(c), down);
 }
 
 void a800session_sysaction(a800session* s, int sysact)
@@ -796,15 +795,28 @@ void a800session_sysaction(a800session* s, int sysact)
 	}
 }
 
+// Lets go of the keyboard and the window's pointer (focus loss). A gamepad is
+// left alone: its own thread knows when it lets go.
 void a800session_release_all(a800session* s)
 {
 	SessionImpl* im = Impl(s);
-	for (auto& j : im->joy)
-		j.store(0);
-	im->console.store(0);
+	for (auto& port : im->joySrc) {
+		port[A800_SRC_KEYBOARD].store(0);
+		port[A800_SRC_POINTER].store(0);
+	}
+	im->conSrc[A800_SRC_KEYBOARD].store(0);
+	im->conSrc[A800_SRC_POINTER].store(0);
+	im->fireSrc[A800_SRC_POINTER].store(0);
+	for (auto& t : im->turnDir)
+		t.store(0);
+	for (auto& p : im->potSrc) {
+		int own = A800_SRC_POINTER;
+		p.compare_exchange_strong(own, -1);   // the position stays; nobody holds it
+	}
 	std::lock_guard<std::mutex> lock(im->keyMtx);
 	im->held.clear();
 	im->modShift = im->modCtrl = 0;
+	memset(im->heldKeysym, 0, sizeof im->heldKeysym);
 	im->keyCode.store(AKEY_NONE);   // a pending tap (already let go) still lands
 	im->keyShift.store(0);
 }
@@ -814,23 +826,12 @@ unsigned a800session_buttons_held(a800session* s, int port)
 	SessionImpl* im = Impl(s);
 	if (port < 0 || port >= A800_PORTS)
 		return 0;
-	return im->joy[port].load() | im->joyPad[port].load();
+	return im->MergedJoy(port);
 }
 
 unsigned a800session_console_held(a800session* s)
 {
-	return Impl(s)->console.load();
-}
-
-void session_gamepad_apply(struct a800session* s, int port, int act, int down)
-{
-	SessionImpl* im = Impl(s);
-	if (port < 0 || port >= A800_PORTS || act < 0 || act >= A800_ACT_PER_PORT)
-		return;
-	if (down)
-		im->joyPad[port].fetch_or(1u << act);
-	else
-		im->joyPad[port].fetch_and(~(1u << act));
+	return Impl(s)->MergedConsole();
 }
 
 // The Atari takes one key at a time: the most recent one still held.
@@ -886,6 +887,38 @@ bool SessionImpl::cx85Fitted()
 	return false;
 }
 
+// A CX85 key from a pad drawn in the window (the host's numeric keypad reaches
+// it through a800session_key, above). Held in the keyboard's own list under a
+// keysym of its own.
+void a800session_cx85_key(a800session* s, int key, int down)
+{
+	static const int codes[A800_CX85_COUNT] = {
+		AKEY_CX85_0, AKEY_CX85_1, AKEY_CX85_2, AKEY_CX85_3, AKEY_CX85_4, AKEY_CX85_5,
+		AKEY_CX85_6, AKEY_CX85_7, AKEY_CX85_8, AKEY_CX85_9, AKEY_CX85_PERIOD,
+		AKEY_CX85_MINUS, AKEY_CX85_PLUS_ENTER, AKEY_CX85_ESCAPE, AKEY_CX85_DELETE,
+		AKEY_CX85_YES, AKEY_CX85_NO,
+	};
+	SessionImpl* im = Impl(s);
+	if (key < 0 || key >= A800_CX85_COUNT)
+		return;
+	std::lock_guard<std::mutex> lock(im->keyMtx);
+	const uint32_t sym = 0x40000u + (uint32_t)key;
+	if (down) {
+		if (!im->cx85Fitted())
+			return;
+		for (auto& h : im->held)
+			if (h.keysym == sym)
+				return;
+		im->held.push_back({sym, codes[key]});
+	}
+	else {
+		im->held.erase(std::remove_if(im->held.begin(), im->held.end(),
+		                              [&](const SessionImpl::Held& h) { return h.keysym == sym; }),
+		               im->held.end());
+	}
+	im->UpdateKey();
+}
+
 int a800session_key(a800session* s, uint32_t keysym, uint32_t unicode, int down)
 {
 	SessionImpl* im = Impl(s);
@@ -920,9 +953,26 @@ int a800session_key(a800session* s, uint32_t keysym, uint32_t unicode, int down)
 		im->UpdateKey();
 		return 1;
 	}
-	int target = session_binding_target_for_key(s, keysym);
+	// bindings are case-folded; so is what a held key is remembered by
+	const uint32_t folded = keysym >= 'A' && keysym <= 'Z' ? keysym + 32 : keysym;
+	if (!down) {
+		// a key lets go of exactly what its press asserted, whatever it is bound to now
+		bool was = false;
+		for (int t = 0; t < A800_TARGET_COUNT; t++)
+			if (im->heldKeysym[t] == folded && keysym) {
+				im->heldKeysym[t] = 0;
+				input_press(s, A800_SRC_KEYBOARD, t, 0);
+				was = true;
+			}
+		if (was)
+			return 1;
+	}
+	int target = down ? session_binding_target_for_key(s, keysym) : -1;
 	if (target >= 0) {
-		a800session_press(s, target, down);
+		if (im->heldKeysym[target] != folded) {   // auto-repeat asserts nothing new
+			im->heldKeysym[target] = folded;
+			input_press(s, A800_SRC_KEYBOARD, target, 1);
+		}
 		return 1;
 	}
 	if (!down) {
@@ -1065,6 +1115,11 @@ int a800session_gamepad_last_event(a800session* s, char* dst, int dstsz)
 int session_active_ports(struct a800session* s)
 {
 	return !a800_machine_is_xl(prefs_machine(s)) || a800session_get_int(s, "multijoy", 0) ? 4 : 2;
+}
+
+int a800session_active_ports(a800session* s)
+{
+	return session_active_ports(s);
 }
 
 #ifdef A800_GAMEPAD_STUB
