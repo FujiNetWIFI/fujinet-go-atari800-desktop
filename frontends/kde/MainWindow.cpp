@@ -88,7 +88,7 @@ MainWindow::MainWindow(a800session *session, QWidget *parent)
     connect(&m_statusTimer, &QTimer::timeout, this, &MainWindow::updateStatus);
     m_statusTimer.start(1000);
     connect(&m_fastTimer, &QTimer::timeout, this, &MainWindow::fastTick);
-    m_fastTimer.start(100);
+    m_fastTimer.start(50);
     /* the current pads and FujiNet state are the baseline: no messages */
     m_padGeneration = a800session_gamepad_generation(session);
     m_fujinetGeneration = a800session_fujinet_generation(session);

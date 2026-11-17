@@ -29,13 +29,18 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QShortcut>
 #include <QTabWidget>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QApplication>
+#include <cstring>
+#include <memory>
 #include <vector>
 
 #include "controllers/ControllersWindow.h"
@@ -300,6 +305,143 @@ QWidget *romsPage(State &st)
     return scroll;
 }
 
+
+/* ---- the Input page's own rows -------------------------------------------------------------
+ * The Input page is the session's table (the controller ports, the joysticks); what only a
+ * frontend can show is added under it: the gamepads switch (the same preference as FujiNet >
+ * Host's, so it shows in both), one row per connected pad with the port it plays, and the two
+ * actions. The pad rows follow the pads as they come and go. */
+
+QString portText(int port)
+{
+    return port < 0 ? QStringLiteral("drives nothing") : QStringLiteral("drives port %1").arg(port + 1);
+}
+
+void rebuildPadRows(State &st, QWidget *holder, QLabel **countNote)
+{
+    QLayout *lay = holder->layout();
+    while (QLayoutItem *item = lay->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    const int count = a800session_gamepad_count(st.session);
+    if (count == 0) {
+        auto *none = new QLabel(QStringLiteral("No gamepads connected - plug one in"));
+        none->setStyleSheet(QStringLiteral("color: gray;"));
+        lay->addWidget(none);
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        char name[128];
+        a800session_gamepad_name(st.session, i, name, sizeof name);
+        auto *row = new QWidget;
+        auto *line = new QHBoxLayout(row);
+        line->setContentsMargins(0, 0, 0, 0);
+        auto *label = new QLabel(QString::fromUtf8(name));
+        label->setToolTip(QString::fromUtf8(name));
+        auto *eff = new QLabel(portText(a800session_gamepad_effective_port(st.session, i)));
+        eff->setObjectName(QStringLiteral("padEff"));
+        eff->setStyleSheet(QStringLiteral("color: gray;"));
+        auto *box = new QComboBox;
+        box->setObjectName(QStringLiteral("padPort%1").arg(i));
+        box->addItems({ QStringLiteral("Automatic"), QStringLiteral("Port 1"), QStringLiteral("Port 2"),
+                        QStringLiteral("Port 3"), QStringLiteral("Port 4") });
+        const int assign = a800session_gamepad_assignment(st.session, i);
+        box->setCurrentIndex(assign < 0 || assign >= A800_PORTS ? 0 : assign + 1);
+        QObject::connect(box, &QComboBox::currentIndexChanged, box, [&st, i, eff](int idx) {
+            a800session_gamepad_assign(st.session, i, idx <= 0 ? -1 : idx - 1);
+            eff->setText(portText(a800session_gamepad_effective_port(st.session, i)));
+        });
+        line->addWidget(label, 1);
+        line->addWidget(eff);
+        line->addWidget(box);
+        lay->addWidget(row);
+    }
+    (void)countNote;
+}
+
+void addInputExtras(State &st, QVBoxLayout *pageLayout, QDialog *dlg, QWidget *owner)
+{
+    auto *box = new QGroupBox(QStringLiteral("Gamepads"));
+    auto *form = new QFormLayout(box);
+    /* the gamepads switch: the same preference as FujiNet > Host's */
+    for (int i = 0; i < a800session_pref_count(); i++) {
+        const a800_pref *p = a800session_pref(i);
+        if (std::strcmp(p->key, "enable_gamepad") != 0)
+            continue;
+        Row r;
+        r.pref = i;
+        r.widget = makeEditor(st, i, &r.path);
+        auto *label = new QLabel(QString::fromUtf8(p->label));
+        if (p->help)
+            label->setToolTip(QString::fromUtf8(p->help));
+        r.widget->setObjectName(QStringLiteral("enableGamepads"));
+        r.widget->setToolTip(p->help ? QString::fromUtf8(p->help) : QStringLiteral("Takes effect when Preferences closes"));
+        r.label = label;
+        form->addRow(label, r.widget);
+        st.rows.push_back(r);
+        break;
+    }
+    auto *holder = new QWidget;
+    holder->setObjectName(QStringLiteral("padRows"));
+    auto *holderLayout = new QVBoxLayout(holder);
+    holderLayout->setContentsMargins(0, 0, 0, 0);
+    holderLayout->setSpacing(2);
+    form->addRow(holder);
+    rebuildPadRows(st, holder, nullptr);
+
+    /* follow the pads: rebuilt when one comes or goes, the port text kept fresh */
+    auto gen = std::make_shared<unsigned>(a800session_gamepad_generation(st.session));
+    auto *timer = new QTimer(dlg);
+    QObject::connect(timer, &QTimer::timeout, holder, [&st, holder, gen] {
+        const unsigned now = a800session_gamepad_generation(st.session);
+        if (now != *gen) {
+            *gen = now;
+            rebuildPadRows(st, holder, nullptr);
+            return;
+        }
+        const auto effs = holder->findChildren<QLabel *>(QStringLiteral("padEff"));
+        for (int i = 0; i < effs.size(); ++i)
+            effs[i]->setText(portText(a800session_gamepad_effective_port(st.session, i)));
+    });
+    timer->start(300);
+    pageLayout->addWidget(box);
+
+    /* the actions */
+    auto *actions = new QGroupBox(QStringLiteral("Controls"));
+    auto *row = new QHBoxLayout(actions);
+    auto *reset = new QPushButton(QStringLiteral("Reset Controls"));
+    reset->setObjectName(QStringLiteral("resetControls"));
+    reset->setToolTip(QStringLiteral("Every key and gamepad button back to its default, and every gamepad to Automatic"));
+    QObject::connect(reset, &QPushButton::clicked, reset, [&st, holder, dlg] {
+        if (QMessageBox::question(dlg, QStringLiteral("Reset Controls"),
+                                  QStringLiteral("Put every key and gamepad button back to its default, and every "
+                                                 "gamepad back to Automatic?")) != QMessageBox::Yes)
+            return;
+        a800session_bindings_reset(st.session);
+        for (int i = 0; i < a800session_gamepad_count(st.session); ++i)
+            a800session_gamepad_assign(st.session, i, -1);
+        rebuildPadRows(st, holder, nullptr);
+    });
+    auto *open = new QPushButton(QStringLiteral("Open Controllers"));
+    open->setObjectName(QStringLiteral("openControllers"));
+    open->setToolTip(QStringLiteral("Closes Preferences and shows the Controllers window (F9)"));
+    a800session *session = st.session;
+    QPointer<QWidget> parent(owner);
+    QObject::connect(open, &QPushButton::clicked, open, [dlg, session, parent] {
+        dlg->accept();
+        /* after the dialog is gone, so the window can take the keyboard */
+        QTimer::singleShot(0, qApp, [session, parent] {
+            if (parent)
+                a800ControllersShow(parent, session);
+        });
+    });
+    row->addWidget(reset);
+    row->addWidget(open);
+    row->addStretch(1);
+    pageLayout->addWidget(actions);
+}
+
 } // namespace
 
 int SettingsDialog::run(QWidget *parent, a800session *session, const std::function<void()> &onLive)
@@ -322,8 +464,11 @@ int SettingsDialog::run(QWidget *parent, a800session *session, const std::functi
         const a800_pref *p = a800session_pref(i);
         const QString pg = QString::fromUtf8(p->page), gr = QString::fromUtf8(p->group);
         if (!page || pg != lastPage) {
-            if (pageLayout)
+            if (pageLayout) {
+                if (lastPage == QLatin1String("Input"))
+                    addInputExtras(st, pageLayout, &dlg, parent);
                 pageLayout->addStretch(1);
+            }
             page = new QWidget;
             pageLayout = new QVBoxLayout(page);
             auto *scroll = new QScrollArea;
@@ -363,8 +508,18 @@ int SettingsDialog::run(QWidget *parent, a800session *session, const std::functi
         form->addRow(label, r.widget);
         st.rows.push_back(r);
     }
-    if (pageLayout)
+    if (pageLayout) {
+        if (lastPage == QLatin1String("Input"))
+            addInputExtras(st, pageLayout, &dlg, parent);
         pageLayout->addStretch(1);
+    }
+    /* A800_SETTINGS_PAGE=Input opens on that tab (a screenshot or a test) */
+    {
+        const QString want = qEnvironmentVariable("A800_SETTINGS_PAGE");
+        for (int i = 0; i < pageNames.size(); ++i)
+            if (!want.isEmpty() && pageNames[i] == want)
+                tabs->setCurrentIndex(i);
+    }
 
     /* Help, F1 and Ctrl+Shift+H (the app's shortcuts don't reach a modal
      * dialog) open the page's own */
