@@ -42,7 +42,7 @@ static int web(const char *method, const char *path, const char *json, char *out
     for (;;) {
         struct pollfd pf = {fd, POLLIN, 0};
         int n;
-        if (poll(&pf, 1, total ? 1500 : 6000) <= 0)
+        if (poll(&pf, 1, total ? 30000 : TEST_WAIT_MS) <= 0)
             break;
         n = (int)recv(fd, out + total, (size_t)(outsz - 1 - total), 0);
         if (n <= 0)

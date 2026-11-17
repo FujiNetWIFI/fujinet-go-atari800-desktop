@@ -10,6 +10,12 @@
 #include "a800session.h"
 #include "test_tmpdir.h"
 
+/* These tests also run on shared CI machines (the org's self-hosted runners,
+   macOS VMs several to a host) where an emulator can crawl for minutes while
+   other jobs run. A wait returns the moment its condition holds, so a generous
+   floor costs a passing run nothing and only a real failure waits it out. */
+#define TEST_WAIT_MS (15 * 60 * 1000)
+
 static inline void test_sleep_ms(int ms)
 {
     struct timespec ts = {ms / 1000, (long)(ms % 1000) * 1000000L};
@@ -74,7 +80,7 @@ static inline int test_start_fujinet(a800session *s)
     int t;
     if (a800session_start(s, &o) != 0 || !a800session_fujinet_running(s))
         return 0;
-    for (t = 0; t < 5000 && !a800session_fujinet_link(s); t += 50)
+    for (t = 0; t < TEST_WAIT_MS && !a800session_fujinet_link(s); t += 50)
         test_sleep_ms(50);
     CHECK(a800session_fujinet_link(s), "NetSIO link");
     return 1;
@@ -92,6 +98,7 @@ static inline int test_wait_text(a800session *s, const char *text, int ms)
 {
     char buf[2048];
     int t;
+    if (ms < TEST_WAIT_MS) ms = TEST_WAIT_MS;
     for (t = 0; t < ms; t += 50) {
         a800session_copy_screen_text(s, buf, sizeof buf);
         if (strstr(buf, text))
@@ -107,6 +114,7 @@ static inline int test_wait_fujinet_log(a800session *s, const char *text, int ms
 {
     static char buf[1 << 20];
     int t;
+    if (ms < TEST_WAIT_MS) ms = TEST_WAIT_MS;
     for (t = 0; t < ms; t += 100) {
         a800session_fujinet_copy_log(s, buf, sizeof buf);
         if (strstr(buf, text))

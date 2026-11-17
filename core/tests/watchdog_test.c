@@ -31,7 +31,7 @@ static void http_get(const char *path)
     a.sin_family = AF_INET;
     a.sin_port = htons(A800SESSION_WEBUI_PORT);
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    for (t = 0; t < 5000; t += 100) {
+    for (t = 0; t < TEST_WAIT_MS; t += 100) {
         fd = (int)socket(AF_INET, SOCK_STREAM, 0);
         CHECK(fd >= 0, "socket");
         if (connect(fd, (struct sockaddr *)&a, sizeof a) == 0)
@@ -52,6 +52,7 @@ static int wait_event(a800session *s, unsigned gen, const char *text, int ms)
 {
     char ev[200];
     int t;
+    if (ms < TEST_WAIT_MS) ms = TEST_WAIT_MS;
     for (t = 0; t < ms; t += 50) {
         if (a800session_fujinet_generation(s) != gen) {
             a800session_fujinet_last_event(s, ev, sizeof ev);
@@ -77,7 +78,7 @@ int main(void)
     gen = a800session_fujinet_generation(s);
     http_get("/restart");
     CHECK(wait_event(s, gen, "restarted", 8000), "restarted by itself");
-    for (t = 0; t < 5000 && !a800session_fujinet_link(s); t += 50)
+    for (t = 0; t < TEST_WAIT_MS && !a800session_fujinet_link(s); t += 50)
         test_sleep_ms(50);
     CHECK(a800session_fujinet_running(s) && a800session_fujinet_link(s), "back and linked");
 
