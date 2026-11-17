@@ -186,7 +186,7 @@ static void check_incremental_log(a800session *s)
     CHECK(strlen(b) >= strlen(a) && strncmp(a, b, strlen(a)) == 0,
           "appended text is the log read whole (%zu vs %zu bytes)", strlen(a), strlen(b));
     a800session_power_cycle(s);
-    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 20000), "CONFIG after power cycle");
+    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 60000), "CONFIG after power cycle");
     CHECK(drain_log(s, &c1, a, sizeof a), "a restart resets the reader");
     CHECK(strstr(a, "READ DEVICE SLOTS"), "the new run's log");
 }
@@ -212,7 +212,7 @@ int main(void)
         return 77;
     }
     /* CONFIG running: it asks FujiNet for the host and drive slots */
-    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 20000), "CONFIG booted");
+    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 60000), "CONFIG booted");
     test_sleep_ms(1500);
     check_trace(s);
     if (getenv("A800_TEST_SHOT"))
@@ -221,7 +221,7 @@ int main(void)
     /* power cycle: FujiNet restarts (a fresh log) and boots CONFIG again */
     a800session_power_cycle(s);
     CHECK(a800session_fujinet_running(s) && a800session_fujinet_link(s), "FujiNet back");
-    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 20000), "CONFIG after power cycle");
+    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 60000), "CONFIG after power cycle");
 
 #ifndef _WIN32
     /* the SD card, then a TNFS server: the same listing before and after

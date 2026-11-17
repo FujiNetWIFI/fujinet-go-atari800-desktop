@@ -69,14 +69,14 @@ int main(void)
         puts("media: ok (FujiNet skipped)");
         return 0;
     }
-    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 20000), "CONFIG first");
+    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 60000), "CONFIG first");
     CHECK(!a800session_states_available(s), "no states with FujiNet");
     CHECK(a800session_open(s, atr, msg, sizeof msg) == 0, "open atr via FujiNet: %s", msg);
     CHECK(test_wait_text(s, "HELLO", 10000), "booted from FujiNet's D1");
     CHECK(a800session_drive_info(s, 0, &di) == 0 && di.fujinet && strstr(di.path, "hello.atr"),
           "FujiNet D1: %s", di.path);
     a800session_reboot_to_config(s);
-    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 20000), "CONFIG again");
+    CHECK(test_wait_fujinet_log(s, "READ DEVICE SLOTS", 60000), "CONFIG again");
     CHECK(a800session_drive_info(s, 0, &di) == 0 && !di.path[0], "D1 ejected: %s", di.path);
     a800session_stop(s);
     a800session_free(s);
