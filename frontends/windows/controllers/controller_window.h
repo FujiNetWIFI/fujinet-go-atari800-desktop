@@ -1,7 +1,9 @@
 /*
- * The Win32 Controllers panel (F9): the on-screen Atari keyboard, the
- * console keys, the joystick ports and the gamepads with their assignments
- * and bindings, in a fixed-size tool window. Hidden at start.
+ * The Win32 Controllers window (F9): what is plugged into the Atari's ports
+ * (CX40 joysticks, CX30 paddles, mice, Trak-Ball, Koala Pad, touch tablet,
+ * light pen and gun, CX85 keypad) drawn as a player sees it from the session's
+ * layout, the console keys, the on-screen Atari keyboard, and the gamepads with
+ * their ports and bindings, in a fixed-size tool window. Hidden at start.
  *
  * Copyright (C) 2026 Thomas Cherryhomes
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -14,6 +16,8 @@
 
 /* Show / hide (F9). Created on first use, hidden not destroyed after. */
 void a800_controller_window_toggle(HWND parent, a800session *session);
+/* Show it (raising it when open): Settings > Input > Open Controllers. */
+void a800_controller_window_show(HWND parent, a800session *session);
 int  a800_controller_window_visible(void);
 
 /* The gamepad set, the machine or a port's device changed: refresh. */

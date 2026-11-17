@@ -57,6 +57,7 @@
 #define IDM_CONSOLE        1170
 
 #define IDC_STATUSBAR      2200
+#define IDC_CTRL_TARGETS   2300     /* the Controllers window's list of every binding target */
 #define IDC_LOG_EDIT       2100
 #define IDC_LOG_HELP       2101
 #define IDT_LOG_REFRESH    1

@@ -1437,7 +1437,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     g_pad_generation = a800session_gamepad_generation(g_session);
     g_fuji_generation = a800session_fujinet_generation(g_session);
     SetTimer(g_hwnd, IDT_STATUS, 1000, NULL);
-    SetTimer(g_hwnd, IDT_SYSACT, 100, NULL);
+    SetTimer(g_hwnd, IDT_SYSACT, 50, NULL);
     update_status();
 
     /* A800_OPEN_CONTROLLERS / _DEBUGGER / _SETTINGS open those windows at

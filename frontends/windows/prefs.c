@@ -15,6 +15,7 @@
  */
 
 #include "prefs.h"
+#include "controllers/controller_window.h"
 #include "help/help_window.h"
 
 #include <commctrl.h>
@@ -37,6 +38,12 @@
 #define ID_ROM_LIST 3001
 #define ID_ROM_IMPORT 3002
 #define ID_ROW 3100             /* + pref * 4 + part */
+#define ID_PAD_COMBO 4000       /* + row: a gamepad's port */
+#define ID_RESET_CONTROLS 4010
+#define ID_OPEN_CONTROLLERS 4011
+#define ID_PADS_TIMER 1
+#define PAD_ROWS 4              /* gamepads the Input page has room for */
+#define PAD_EXTRA_H (HEAD_H + 4 + ROW_H + PAD_ROWS * ROW_H + 8 + 30) /* the Gamepads group */
 #define HELP_H 40               /* a text row's note under it */
 #ifndef EM_SETCUEBANNER
 #define EM_SETCUEBANNER 0x1501
@@ -49,7 +56,8 @@ typedef struct {
     int bad;                    /* a text row whose text was refused */
 } Row;
 
-static HWND g_win, g_tabs, g_pages[MAX_PAGES], g_rom_list;
+static HWND g_win, g_tabs, g_pages[MAX_PAGES], g_rom_list, g_parent;
+static HWND g_pad_name[PAD_ROWS], g_pad_combo[PAD_ROWS], g_pad_note;
 static int g_page_count;
 static Row g_rows[MAX_ROWS];
 static a800session *g_s;
@@ -60,6 +68,8 @@ static void (*g_on_closed)(int);
 static HFONT g_font, g_bold;
 
 static void refresh(void);
+static HWND child(HWND parent, DWORD ex, const char *cls, const char *text, DWORD style,
+                  int x, int y, int w, int h, int id, HFONT font);
 
 static void changed(int i)
 {
@@ -263,9 +273,63 @@ static LRESULT CALLBACK page_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
+/* The Gamepads group on the Input page: a row per connected pad with the port it
+ * plays (Automatic, or one of the four). Rebuilt on a timer, so a pad plugged in
+ * with Settings open shows up. */
+static void refresh_pads_ui(void)
+{
+    int r;
+    const int count = g_s ? a800session_gamepad_count(g_s) : 0;
+    if (!g_pad_note) return;
+    g_syncing = 1;
+    ShowWindow(g_pad_note, count == 0 ? SW_SHOW : SW_HIDE);
+    for (r = 0; r < PAD_ROWS; r++) {
+        const int show = r < count;
+        ShowWindow(g_pad_name[r], show ? SW_SHOW : SW_HIDE);
+        ShowWindow(g_pad_combo[r], show ? SW_SHOW : SW_HIDE);
+        if (show) {
+            char name[128], line[200];
+            const int assign = a800session_gamepad_assignment(g_s, r);
+            const int effective = a800session_gamepad_effective_port(g_s, r);
+            a800session_gamepad_name(g_s, r, name, sizeof name);
+            if (effective >= 0) snprintf(line, sizeof line, "%s (port %d)", name, effective + 1);
+            else snprintf(line, sizeof line, "%s (plays nothing)", name);
+            set_text_utf8(g_pad_name[r], line);
+            SendMessageA(g_pad_combo[r], CB_SETCURSEL, (WPARAM)(assign < 0 || assign > 3 ? 0 : assign + 1), 0);
+        }
+    }
+    g_syncing = 0;
+}
+
+static void build_gamepads(HWND pg, int y)
+{
+    static const char *const ports[5] = { "Automatic", "Port 1", "Port 2", "Port 3", "Port 4" };
+    int r, k;
+    child(pg, 0, "STATIC", "Gamepads", 0, 12, y + 4, PAGE_W - 24, 20, 0, g_bold);
+    y += HEAD_H + 4;
+    g_pad_note = child(pg, 0, "STATIC", "No gamepads connected - plug one in. Which port each USB pad plays is "
+                       "remembered.", 0, 24, y + 4, PAGE_W - 48, 20, 0, g_font);
+    y += ROW_H;
+    for (r = 0; r < PAD_ROWS; r++) {
+        g_pad_name[r] = child(pg, 0, "STATIC", "", SS_ENDELLIPSIS, 24, y + 4, CTRL_X - 36 + 100, 20, 0, g_font);
+        g_pad_combo[r] = child(pg, 0, "COMBOBOX", "", CBS_DROPDOWNLIST | WS_VSCROLL, CTRL_X + 100, y,
+                               CTRL_W - 100, 200, ID_PAD_COMBO + r, g_font);
+        for (k = 0; k < 5; k++) SendMessageA(g_pad_combo[r], CB_ADDSTRING, 0, (LPARAM)ports[k]);
+        ShowWindow(g_pad_name[r], SW_HIDE);
+        ShowWindow(g_pad_combo[r], SW_HIDE);
+        y += ROW_H;
+    }
+    y += 8;
+    child(pg, 0, "BUTTON", "Reset Controls", BS_PUSHBUTTON, 24, y, 130, 26, ID_RESET_CONTROLS, g_font);
+    child(pg, 0, "BUTTON", "Open Controllers", BS_PUSHBUTTON, 164, y, 140, 26, ID_OPEN_CONTROLLERS, g_font);
+}
+
 static LRESULT CALLBACK prefs_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
+    case WM_TIMER:
+        if (wp == ID_PADS_TIMER) refresh_pads_ui();
+        return 0;
     case WM_NOTIFY: {
         const NMHDR *n = (const NMHDR *)lp;
         if (n->idFrom == ID_TABS && n->code == TCN_SELCHANGE)
@@ -290,6 +354,25 @@ static LRESULT CALLBACK prefs_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         const int id = LOWORD(wp), code = HIWORD(wp);
         int i, part;
         if (id == ID_PREFS_HELP) { a800_help_for(g_win); return 0; }
+        if (id >= ID_PAD_COMBO && id < ID_PAD_COMBO + PAD_ROWS) {
+            if (code == CBN_SELCHANGE && !g_syncing) {
+                const int sel = (int)SendMessageA(g_pad_combo[id - ID_PAD_COMBO], CB_GETCURSEL, 0, 0);
+                if (sel >= 0) a800session_gamepad_assign(g_s, id - ID_PAD_COMBO, sel - 1);   /* 0 = automatic */
+                refresh_pads_ui();
+            }
+            return 0;
+        }
+        if (id == ID_RESET_CONTROLS) {
+            if (MessageBoxA(hwnd, "Put every key and gamepad button back to its default, and every gamepad on "
+                            "Automatic?", "Reset Controls", MB_ICONQUESTION | MB_YESNO) == IDYES) {
+                int pad;
+                a800session_bindings_reset(g_s);
+                for (pad = 0; pad < a800session_gamepad_count(g_s); pad++) a800session_gamepad_assign(g_s, pad, -1);
+                refresh_pads_ui();
+            }
+            return 0;
+        }
+        if (id == ID_OPEN_CONTROLLERS) { a800_controller_window_show(g_parent, g_s); return 0; }
         if (id == ID_ROM_IMPORT) { import_rom(); return 0; }
         if (id < ID_ROW || g_syncing) return 0;
         i = (id - ID_ROW) / 4;
@@ -367,7 +450,9 @@ static LRESULT CALLBACK prefs_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_DESTROY: {
         int did;
+        KillTimer(hwnd, ID_PADS_TIMER);
         g_win = NULL;
+        g_pad_note = NULL;
         a800session_settings_flush(g_s);
         did = g_pending > A800_APPLY_LIVE ? a800session_apply_settings(g_s) : 0;
         if (g_on_closed) g_on_closed(did);
@@ -450,11 +535,14 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
     static int registered;
     RECT want, area, pr;
     int i, page = -1, y = 0, page_h = 0, heights[MAX_PAGES] = {0};
+    int input_page = -1, cur_y = 0;
+    HWND cur_pg = NULL;
     const char *last_page = NULL, *last_group = NULL;
     TCITEMA tab;
 
     if (g_win) { SetForegroundWindow(g_win); return; }
     g_s = session;
+    g_parent = parent;
     g_on_live = on_live;
     g_on_closed = on_closed;
     g_pending = A800_APPLY_LIVE;
@@ -495,7 +583,9 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
         heights[page] += ROW_H;
         if (p->type == A800_PREF_TEXT && p->help)
             heights[page] += HELP_H;
+        if (!strcmp(p->page, "Input")) input_page = page;
     }
+    if (input_page >= 0) heights[input_page] += PAD_EXTRA_H;
     for (i = 0; i <= page; i++)
         if (heights[i] > page_h) page_h = heights[i];
     page_h += 12;
@@ -520,6 +610,7 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
         Row *r = &g_rows[i];
         const int id = ID_ROW + i * 4;
         if (!last_page || strcmp(last_page, p->page)) {
+            if (last_page && !strcmp(last_page, "Input") && cur_pg) build_gamepads(cur_pg, cur_y);
             if (!strcmp(p->page, "Peripherals") && g_page_count < MAX_PAGES - 1) {
                 /* the ROMs tab follows Peripherals, as in the other frontends */
                 tab.pszText = (char *)p->page;
@@ -600,8 +691,13 @@ void a800_prefs_show(HWND parent, a800session *session, void (*on_live)(void),
             break;
         }
         y += ROW_H;
+        cur_pg = pg;
+        cur_y = y;
     }
+    if (last_page && !strcmp(last_page, "Input") && cur_pg) build_gamepads(cur_pg, cur_y);
     refresh();
+    refresh_pads_ui();
+    SetTimer(g_win, ID_PADS_TIMER, 300, NULL);
     show_page(0);
     ShowWindow(g_win, SW_SHOW);
 }
