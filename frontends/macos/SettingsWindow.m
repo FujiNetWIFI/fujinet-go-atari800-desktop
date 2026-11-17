@@ -49,6 +49,12 @@ static NSString *str(const char *s)
     NSMutableArray<NSTextField *> *_romStates;
     BOOL _syncing;
     int _pending;
+    /* the Input page's gamepad block */
+    NSButton *_padsBox;
+    NSPopUpButton *_padList;
+    NSPopUpButton *_padPort;
+    NSTimer *_padTimer;
+    unsigned _padGeneration;
 }
 
 - (instancetype)initWithSession:(a800session *)session
@@ -265,7 +271,142 @@ static NSString *str(const char *s)
     }
     for (NSUInteger s = 0; s < [_romStates count]; s++)
         [_romStates[s] setStringValue:a800session_rom_available(_session, (int)s) ? @"Imported" : @"Not imported"];
+    if (_padsBox)
+        [_padsBox setState:a800session_get_int(_session, "enable_gamepad", 1) ? NSControlStateValueOn : NSControlStateValueOff];
     _syncing = NO;
+}
+
+/* ---- the Input page's gamepad block ----------------------------------------------- */
+
+/* Enable gamepads: the pad thread starts or stops with the session, so it
+ * applies when this window closes (the same row as FujiNet > Host's). */
+- (void)padsToggled:(NSButton *)box
+{
+    if (_syncing) return;
+    a800session_set_int(_session, "enable_gamepad", [box state] == NSControlStateValueOn ? 1 : 0);
+    if (_pending < A800_APPLY_RESTART) _pending = A800_APPLY_RESTART;
+    [self refresh];
+}
+
+/* The connected gamepads, and the port the chosen one is set to. */
+- (void)refreshPadList
+{
+    const NSInteger keep = [_padList indexOfSelectedItem];
+    const int count = a800session_gamepad_count(_session);
+    _padGeneration = a800session_gamepad_generation(_session);
+    [_padList removeAllItems];
+    for (int idx = 0; idx < count; idx++) {
+        char name[128];
+        name[0] = '\0';
+        a800session_gamepad_name(_session, idx, name, (int)sizeof name);
+        const int eff = a800session_gamepad_effective_port(_session, idx);
+        NSString *where = eff >= 0 ? [NSString stringWithFormat:@"port %d", eff + 1] : @"no port";
+        /* items with equal titles collapse: the index keeps them apart */
+        [[_padList menu] addItemWithTitle:[NSString stringWithFormat:@"%d: %@  [%@]", idx + 1,
+                                           strlen(name) ? str(name) : @"Gamepad", where]
+                                   action:nil keyEquivalent:@""];
+    }
+    if (count == 0) [[_padList menu] addItemWithTitle:@"No gamepads connected" action:nil keyEquivalent:@""];
+    [_padList setEnabled:count > 0];
+    [_padPort setEnabled:count > 0];
+    [_padList selectItemAtIndex:keep >= 0 && keep < count ? keep : 0];
+    [self padSelected:_padList];
+}
+
+- (void)padSelected:(id)sender
+{
+    (void)sender;
+    int assign = -1;
+    const NSInteger sel = [_padList indexOfSelectedItem];
+    if (sel >= 0 && sel < a800session_gamepad_count(_session))
+        assign = a800session_gamepad_assignment(_session, (int)sel);
+    [_padPort selectItemAtIndex:assign < 0 || assign >= A800_PORTS ? 0 : assign + 1];
+}
+
+- (void)padPortChanged:(id)sender
+{
+    (void)sender;
+    const NSInteger sel = [_padList indexOfSelectedItem];
+    if (sel >= 0 && sel < a800session_gamepad_count(_session))
+        a800session_gamepad_assign(_session, (int)sel, (int)[_padPort indexOfSelectedItem] - 1);
+    [self refreshPadList];
+    if (_controlsChanged) _controlsChanged();
+}
+
+/* Reset Controls: the default keys and gamepad buttons, every gamepad back on Automatic. */
+- (void)resetControls:(id)sender
+{
+    (void)sender;
+    a800session_bindings_reset(_session);
+    for (int idx = 0; idx < a800session_gamepad_count(_session); idx++)
+        a800session_gamepad_assign(_session, idx, -1);
+    [self refreshPadList];
+    if (_controlsChanged) _controlsChanged();
+}
+
+- (void)openControllersPressed:(id)sender
+{
+    (void)sender;
+    if (_openControllers) _openControllers();
+}
+
+/* Appends the block to the Input page: Enable gamepads, the gamepad and the port
+ * it plays, Reset Controls and Open Controllers. Hot-plugged pads are picked up
+ * twice a second while the window is open. */
+- (void)addGamepadRowsTo:(NSScrollView *)scroll
+{
+    NSView *doc = [scroll documentView];
+    CGFloat y = NSHeight([doc frame]) - 12;
+    [doc addSubview:[self label:@"Gamepads" frame:NSMakeRect(16, y + 6, PAGE_W - 32, 20) bold:YES]];
+    y += HEAD_H;
+
+    [doc addSubview:[self label:@"Gamepads" frame:NSMakeRect(28, y + 5, LABEL_W - 12, 20) bold:NO]];
+    _padsBox = [NSButton checkboxWithTitle:@"Enable (applies when Settings closes)" target:self action:@selector(padsToggled:)];
+    [_padsBox setFrame:NSMakeRect(CTRL_X, y + 3, PAGE_W - CTRL_X - 16, 22)];
+    [doc addSubview:_padsBox];
+    y += ROW_H;
+
+    [doc addSubview:[self label:@"Gamepad" frame:NSMakeRect(28, y + 5, LABEL_W - 12, 20) bold:NO]];
+    _padList = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(CTRL_X, y + 1, 230, 26) pullsDown:NO];
+    [_padList setTarget:self];
+    [_padList setAction:@selector(padSelected:)];
+    [doc addSubview:_padList];
+    _padPort = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(CTRL_X + 238, y + 1, 110, 26) pullsDown:NO];
+    [_padPort addItemsWithTitles:@[@"Automatic", @"Port 1", @"Port 2", @"Port 3", @"Port 4"]];
+    [_padPort setTarget:self];
+    [_padPort setAction:@selector(padPortChanged:)];
+    [doc addSubview:_padPort];
+    y += ROW_H + 4;
+
+    NSButton *reset = [NSButton buttonWithTitle:@"Reset Controls" target:self action:@selector(resetControls:)];
+    [reset setFrame:NSMakeRect(CTRL_X, y, 130, 28)];
+    [doc addSubview:reset];
+    NSButton *open = [NSButton buttonWithTitle:@"Open Controllers" target:self action:@selector(openControllersPressed:)];
+    [open setFrame:NSMakeRect(CTRL_X + 138, y, 150, 28)];
+    [doc addSubview:open];
+    y += 38;
+
+    NSTextField *note = [NSTextField wrappingLabelWithString:
+        @"The port a gamepad plays applies at once. Keys and gamepad buttons are re-mapped in the "
+        @"Controllers window (View > Controllers, Cmd+K or F9): click Map, choose a control, then press "
+        @"the key or the gamepad button. Reset Controls puts the defaults back."];
+    [note setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+    [note setTextColor:[NSColor secondaryLabelColor]];
+    [note setFrame:NSMakeRect(16, y, PAGE_W - 32, 64)];
+    [doc addSubview:note];
+    y += 72;
+
+    [doc setFrame:NSMakeRect(0, 0, PAGE_W, y + 12)];
+    [self refreshPadList];
+    [_padTimer invalidate];
+    __weak A800SettingsWindow *weakSelf = self;
+    _padTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *tmr) {
+        (void)tmr;
+        A800SettingsWindow *strong = weakSelf;
+        if (strong && a800session_gamepad_generation(strong->_session) != strong->_padGeneration)
+            [strong refreshPadList];
+    }];
+    [_padTimer setTolerance:0.25];
 }
 
 /* ---- building it ------------------------------------------------------------------ */
@@ -430,6 +571,7 @@ static NSString *str(const char *s)
             [item setView:[self pageForRows:rows note:!strcmp(page, "Machine")
                 ? @"Machine settings apply together when Settings closes: the Atari power-cycles once."
                 : nil]];
+            if (!strcmp(page, "Input")) [self addGamepadRowsTo:(NSScrollView *)item.view];
             [self addHelpButtonTo:item.view];
             [tabs addTabViewItem:item];
             if (!strcmp(page, "Peripherals")) {
@@ -483,6 +625,11 @@ static NSString *str(const char *s)
 {
     (void)note;
     a800session_settings_flush(_session);
+    [_padTimer invalidate];
+    _padTimer = nil;
+    _padsBox = nil;
+    _padList = nil;
+    _padPort = nil;
     const int did = _pending > A800_APPLY_LIVE ? a800session_apply_settings(_session) : 0;
     _window = nil;
     if (_onClosed) _onClosed(did);

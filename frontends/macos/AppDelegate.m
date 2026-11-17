@@ -819,6 +819,15 @@ static NSString *str(const char *s)
                 else if (applied == A800_APPLY_RESTART) [me say:@"Restarted with the new options"];
                 [me updateStatus];
             }];
+        /* the Input page: Open Controllers, and a gamepad's port or Reset Controls changed */
+        _settings.openControllers = ^{
+            A800AppDelegate *me = weakSelf;
+            if (me) [me->_controllers show];
+        };
+        _settings.controlsChanged = ^{
+            A800AppDelegate *me = weakSelf;
+            if (me) [me->_controllers refresh];
+        };
     }
     [_settings show];
 }

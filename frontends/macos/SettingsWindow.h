@@ -18,4 +18,10 @@
                          onLive:(void (^)(void))onLive
                        onClosed:(void (^)(int applied))onClosed;
 - (void)show;
+/* Runs from the Input page's Open Controllers button (the app shows the
+ * Controllers window). */
+@property (nonatomic, copy) void (^openControllers)(void);
+/* Runs after the Input page changed a gamepad's port or put the default
+ * controls back (the Controllers window reads them again). */
+@property (nonatomic, copy) void (^controlsChanged)(void);
 @end
