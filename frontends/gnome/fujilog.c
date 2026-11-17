@@ -16,9 +16,13 @@ typedef struct {
     GtkScrolledWindow *scroll;
     a800session *session;
     guint timer;
-    char *last;        /* the text on show: an unchanged log is left alone */
-    gboolean follow;   /* pin the end as the view grows */
+    a800_log_cursor cursor;   /* where in FujiNet's log the view has got to */
+    gboolean placeholder;     /* the "no output yet" line is on show, not log text */
+    gboolean follow;          /* pin the end as the view grows */
 } LogWindow;
+
+/* a long session keeps the last LOG_KEEP characters, whole lines */
+#define LOG_KEEP (256 * 1024)
 
 /* GtkTextView lays new text out later and moves the adjustment itself, so the
  * end is pinned whenever the height changes; whether to follow is decided as
@@ -39,55 +43,59 @@ static void on_destroy(GtkWidget *w, gpointer user_data)
         g_source_remove(lw->timer);
         lw->timer = 0;
     }
-    g_free(lw->last);
     g_free(lw);
 }
 
+/* Appends what the log gained since the last tick. The view is never
+ * rebuilt, so the reader's scroll position and selection stay where they
+ * are; only a reader already at the bottom follows the new text. A restart
+ * of FujiNet (a new log) clears the view. */
 static gboolean refresh(gpointer user_data)
 {
     LogWindow *lw = user_data;
-    static char buf[128 * 1024];
+    static char buf[64 * 1024];
     GtkTextBuffer *b = gtk_text_view_get_buffer(lw->view);
     GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment(lw->scroll);
-    const char *text;
-    char *clean;
     GtkTextIter it;
-    int n, top = 0;
+    int n, reset, rounds = 0;
 
-    n = a800session_fujinet_copy_log(lw->session, buf, sizeof buf);
-    text = n > 0 ? buf : "(no FujiNet output yet)";
-    clean = g_utf8_make_valid(text, -1);
-    if (lw->last && !strcmp(lw->last, clean)) {
+    do {
+        char *clean;
+        n = a800session_fujinet_read_log(lw->session, &lw->cursor, buf, sizeof buf, &reset);
+        if (n <= 0 && !reset)
+            break;
+
+        if (reset || lw->placeholder) {
+            gtk_text_buffer_set_text(b, "", -1);
+            lw->placeholder = FALSE;
+            lw->follow = TRUE;
+        }
+        else {
+            /* Follow the tail only while the reader is at the bottom (or
+             * has not been laid out yet). */
+            lw->follow = !adj || gtk_adjustment_get_page_size(adj) <= 0.0 ||
+                         gtk_adjustment_get_value(adj) + gtk_adjustment_get_page_size(adj) >=
+                             gtk_adjustment_get_upper(adj) - 2.0;
+        }
+
+        clean = g_utf8_make_valid(buf, -1);
+        gtk_text_buffer_get_end_iter(b, &it);
+        gtk_text_buffer_insert(b, &it, clean, -1);
         g_free(clean);
-        return G_SOURCE_CONTINUE;
-    }
 
-    /* Follow the tail only while the reader is at the bottom (or has not
-     * been laid out yet). */
-    lw->follow = !adj || gtk_adjustment_get_page_size(adj) <= 0.0 ||
-                 gtk_adjustment_get_value(adj) + gtk_adjustment_get_page_size(adj) >=
-                     gtk_adjustment_get_upper(adj) - 2.0;
-    if (!lw->follow && adj && gtk_adjustment_get_value(adj) > 0.0) {
-        gtk_text_view_get_line_at_y(lw->view, &it, (int)gtk_adjustment_get_value(adj), NULL);
-        top = gtk_text_iter_get_line(&it);
-    }
-
-    gtk_text_buffer_set_text(b, clean, -1);
-    g_free(lw->last);
-    lw->last = clean;
-
-    if (lw->follow) {
-        if (adj)
+        {
+            int count = gtk_text_buffer_get_char_count(b);
+            if (count > LOG_KEEP) {
+                GtkTextIter s0, e0;
+                gtk_text_buffer_get_start_iter(b, &s0);
+                gtk_text_buffer_get_iter_at_offset(b, &e0, count - LOG_KEEP * 3 / 4);
+                gtk_text_iter_forward_line(&e0);
+                gtk_text_buffer_delete(b, &s0, &e0);
+            }
+        }
+        if (lw->follow && adj)
             on_resized(adj, lw);
-    }
-    else if (top > 0) {
-        /* keep the reader's line: scroll_to_mark waits for the new layout */
-        GtkTextMark *mark;
-        gtk_text_buffer_get_iter_at_line(b, &it, top);
-        mark = gtk_text_buffer_create_mark(b, NULL, &it, TRUE);
-        gtk_text_view_scroll_to_mark(lw->view, mark, 0.0, TRUE, 0.0, 0.0);
-        gtk_text_buffer_delete_mark(b, mark);
-    }
+    } while (n >= (int)sizeof buf - 1 && ++rounds < 16);
     return G_SOURCE_CONTINUE;
 }
 
@@ -147,6 +155,8 @@ void a800_fujilog_show(GtkWindow *parent, a800session *session)
     }
 
     lw->follow = TRUE;
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(lw->view), "(no FujiNet output yet)", -1);
+    lw->placeholder = TRUE;
     g_signal_connect(gtk_scrolled_window_get_vadjustment(lw->scroll), "changed",
                      G_CALLBACK(on_resized), lw);
     g_signal_connect(lw->win, "destroy", G_CALLBACK(on_destroy), lw);

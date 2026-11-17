@@ -626,6 +626,109 @@ patch("lib/hardware/fnSystem.cpp", [
     ),
 ])
 
+# --- restartable runtime ----------------------------------------------------
+# The host stops and starts the runtime in one process (Power Cycle), calling
+# main_shutdown_handler() then main_setup() again on the same globals.
+#  * systemBus::shutdown() sets shuttingDown and nothing cleared it: every
+#    TNFS transaction of the next run "succeeded" at once, parsing the
+#    uninitialised reply packet (corrupted directory names).
+#  * addDevice() push_front'ed every device again, and main_setup() leaked a
+#    fresh printer and modem per run that kept answering the bus.
+patch("lib/bus/sio/sio.cpp", [
+    (
+        'void systemBus::setup()\n'
+        '{\n'
+        '    Debug_println("SIO SETUP");\n',
+        'void systemBus::setup()\n'
+        '{\n'
+        '    Debug_println("SIO SETUP");\n'
+        '    shuttingDown = false; // a restarted runtime is not shutting down\n',
+    ),
+])
+patch("lib/bus/DaisyChain.h", [
+    (
+        '    void addDevice(virtualDevice *newDev, fujiDeviceID_t fujiID);\n',
+        '    void addDevice(virtualDevice *newDev, fujiDeviceID_t fujiID);\n'
+        '    void remDevice(virtualDevice *oldDev);\n',
+    ),
+])
+# A TNFS request that fails while the runtime is shutting down (its umount,
+# or a close, on a connection the server already dropped) slept out all its
+# retries (min_retry_ms each) in the thread being stopped: the host gave up
+# on it after 5 s and detached it. Give up at once instead.
+patch("lib/TNFSlib/tnfslib.cpp", [
+    (
+        '        // Make sure we wait before retrying\n'
+        '        fnSystem.delay(m_info->min_retry_ms);\n',
+        '        // Shutting down: nobody waits for the answer any more\n'
+        '        if (SYSTEM_BUS.getShuttingDown())\n'
+        '            return false;\n'
+        '\n'
+        '        // Make sure we wait before retrying\n'
+        '        fnSystem.delay(m_info->min_retry_ms);\n',
+    ),
+])
+patch("lib/bus/bus.h", [
+    (
+        '    fujiDeviceID_t fujiIDForDevice(virtualDevice *device) {\n',
+        '    void remDevice(virtualDevice *device) {\n'
+        '        _daisyChain.remDevice(device);\n'
+        '    }\n'
+        '    fujiDeviceID_t fujiIDForDevice(virtualDevice *device) {\n',
+    ),
+])
+patch("lib/bus/DaisyChain.cpp", [
+    (
+        'void DaisyChain::addDevice(virtualDevice *newDev, fujiDeviceID_t devID)\n'
+        '{\n'
+        '    _daisyChain.push_front({newDev, devID});\n'
+        '    return;\n'
+        '}\n',
+        'void DaisyChain::addDevice(virtualDevice *newDev, fujiDeviceID_t devID)\n'
+        '{\n'
+        '    // setup runs again when the runtime restarts: one entry per device\n'
+        '    if (entryForDevice(newDev))\n'
+        '        return;\n'
+        '    _daisyChain.push_front({newDev, devID});\n'
+        '    return;\n'
+        '}\n'
+        '\n'
+        'void DaisyChain::remDevice(virtualDevice *oldDev)\n'
+        '{\n'
+        '    _daisyChain.remove_if([oldDev](const DaisyChain::Entry &entry) {\n'
+        '        return entry.device == oldDev;\n'
+        '    });\n'
+        '}\n',
+    ),
+])
+patch("src/main.cpp", [
+    (
+        '    sioPrinter *ptr = new sioPrinter(ptrfs, ptype);\n',
+        '#if defined(FUJINET_EMBEDDED)\n'
+        '    // a restarted runtime replaces the printer of the last run\n'
+        '    if (sioPrinter *old = fnPrinters.get_ptr(0))\n'
+        '    {\n'
+        '        SYSTEM_BUS.remDevice(old);\n'
+        '        fnPrinters.set_ptr(0, nullptr);\n'
+        '        delete old;\n'
+        '    }\n'
+        '#endif\n'
+        '    sioPrinter *ptr = new sioPrinter(ptrfs, ptype);\n',
+    ),
+    (
+        '    sioR = new modem(ptrfs, Config.get_modem_sniffer_enabled()); // Config/User selected sniffer enable\n',
+        '#if defined(FUJINET_EMBEDDED)\n'
+        '    if (sioR != nullptr)\n'
+        '    {\n'
+        '        SYSTEM_BUS.remDevice(sioR);\n'
+        '        delete sioR;\n'
+        '        sioR = nullptr;\n'
+        '    }\n'
+        '#endif\n'
+        '    sioR = new modem(ptrfs, Config.get_modem_sniffer_enabled()); // Config/User selected sniffer enable\n',
+    ),
+])
+
 # --- NetSIO: the host owns FujiNet's power ---------------------------------
 # atari800 sends COLD_RESET on every cold start (and every machine change);
 # fujinet-pc would reboot itself. The app restarts FujiNet on Power Cycle.

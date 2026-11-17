@@ -25,7 +25,8 @@ static inline void test_sleep_ms(int ms)
 
 /* A session in a fresh XDG tree. With FujiNet, its own fnconfig.ini: the
    SD card and no network hosts (tests never touch real servers). */
-static inline a800session *test_session_ex(const char *tag, int fujinet)
+static inline a800session *test_session_cfg(const char *tag, int fujinet, const char *extra_ini,
+                                            char *datadir, size_t datadirsz)
 {
     char base[512], cfg[600], data[600], path[700];
     a800session_paths p;
@@ -36,6 +37,8 @@ static inline a800session *test_session_ex(const char *tag, int fujinet)
     memset(&p, 0, sizeof p);
     p.config_dir = cfg;
     p.data_dir = data;
+    if (datadir && datadirsz)
+        snprintf(datadir, datadirsz, "%s", data);
     if (!fujinet)
         p.fujinet_lib = "";
     else {
@@ -46,10 +49,17 @@ static inline a800session *test_session_ex(const char *tag, int fujinet)
         if ((fp = fopen(path, "w")) != NULL) {
             fputs("[General]\ndevicename=fujinet-test\nconfig_enabled=1\nboot_mode=0\n"
                   "[Host1]\ntype=SD\nname=SD\n", fp);
+            if (extra_ini)
+                fputs(extra_ini, fp);
             fclose(fp);
         }
     }
     return a800session_new(&p);
+}
+
+static inline a800session *test_session_ex(const char *tag, int fujinet)
+{
+    return test_session_cfg(tag, fujinet, NULL, NULL, 0);
 }
 
 static inline a800session *test_session(const char *tag)

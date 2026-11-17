@@ -156,6 +156,8 @@ static NSString *str(const char *s)
     NSWindow *_logWindow;
     NSTextView *_logView;
     NSTimer *_logTimer;
+    a800_log_cursor _logCursor;   /* where in FujiNet's log the window has got to */
+    BOOL _logPlaceholder;         /* "no output yet" is on show, not log text */
 }
 
 - (instancetype)initWithSession:(a800session *)session mediaPath:(const char *)mediaPath
@@ -924,21 +926,36 @@ static NSString *str(const char *s)
 - (void)refreshLog:(NSTimer *)timer
 {
     (void)timer;
-    static char buf[128 * 1024];
-    const int n = a800session_fujinet_copy_log(_session, buf, sizeof buf);
-    NSScrollView *scroll = (NSScrollView *)_logView.enclosingScrollView;
-    NSString *text = (n > 0 ? [NSString stringWithUTF8String:buf] : nil) ?: @"(no FujiNet output yet)";
-    /* unchanged: leave the reader where they are */
-    if ([text isEqualToString:_logView.string]) return;
-    const BOOL atEnd = !scroll || (NSMaxY(scroll.contentView.documentVisibleRect) >=
-                                   NSMaxY(((NSView *)scroll.documentView).frame) - 4.0);
-    const NSPoint where = scroll ? scroll.contentView.bounds.origin : NSZeroPoint;
-    [_logView setString:text];
-    if (atEnd) {
-        [_logView scrollRangeToVisible:NSMakeRange(_logView.string.length, 0)];
-    } else if (scroll) {
-        [scroll.contentView scrollToPoint:where];
-        [scroll reflectScrolledClipView:scroll.contentView];
+    static char buf[64 * 1024];
+    static const NSUInteger keep = 256 * 1024;   /* a long session keeps the last of it, whole lines */
+    if (!_logView) return;
+    /* Append what the log gained since the last tick: the text is never
+     * replaced, so the reader's selection and scroll position stay put and
+     * only a reader at the bottom follows. A FujiNet restart (a new log)
+     * clears it. */
+    for (int round = 0; round < 16; round++) {
+        int reset = 0;
+        const int n = a800session_fujinet_read_log(_session, &_logCursor, buf, sizeof buf, &reset);
+        if (n <= 0 && !reset) return;
+        NSScrollView *scroll = (NSScrollView *)_logView.enclosingScrollView;
+        BOOL atEnd = !scroll || (NSMaxY(scroll.contentView.documentVisibleRect) >=
+                                 NSMaxY(((NSView *)scroll.documentView).frame) - 4.0);
+        NSTextStorage *store = _logView.textStorage;
+        if (reset || _logPlaceholder) {
+            [store replaceCharactersInRange:NSMakeRange(0, store.length) withString:@""];
+            _logPlaceholder = NO;
+            atEnd = YES;
+        }
+        NSString *add = [NSString stringWithUTF8String:buf] ?: @"";
+        [store appendAttributedString:[[NSAttributedString alloc] initWithString:add attributes:@{
+            NSFontAttributeName: _logView.font, NSForegroundColorAttributeName: NSColor.textColor}]];
+        if (store.length > keep) {
+            const NSUInteger from = store.length - keep * 3 / 4;
+            NSRange line = [store.string lineRangeForRange:NSMakeRange(from, 0)];
+            [store deleteCharactersInRange:NSMakeRange(0, NSMaxRange(line))];
+        }
+        if (atEnd) [_logView scrollRangeToVisible:NSMakeRange(_logView.string.length, 0)];
+        if (n < (int)sizeof buf - 1) return;
     }
 }
 
@@ -960,6 +977,9 @@ static NSString *str(const char *s)
         _logView.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
         _logView.autoresizingMask = NSViewWidthSizable;
         scroll.documentView = _logView;
+        memset(&_logCursor, 0, sizeof _logCursor);
+        _logView.string = @"(no FujiNet output yet)";
+        _logPlaceholder = YES;
         _logWindow = [[NSWindow alloc]
             initWithContentRect:NSMakeRect(0, 0, 860, 600)
                       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
@@ -1133,9 +1153,10 @@ static NSString *str(const char *s)
         [menu removeAllItems];
         /* a heading (no action: shown, never chosen) */
         [menu addItemWithTitle:fuji ? @"FujiNet's drives" : @"atari800's drives" action:nil keyEquivalent:@""];
+        a800_drive_info all[A800_DRIVES];   /* one request for all eight */
+        a800session_drive_list(_session, all);
         for (int d = 0; d < A800_DRIVES; d++) {
-            a800_drive_info di;
-            if (a800session_drive_info(_session, d, &di) != 0) memset(&di, 0, sizeof di);
+            a800_drive_info di = all[d];
             NSMenu *sub = [[NSMenu alloc] initWithTitle:[NSString stringWithFormat:@"D%d:", d + 1]];
             [[self item:sub title:fuji ? @"Mount from the SD Card…" : @"Insert…"
                  action:@selector(driveAction:) key:@""] setTag:DRIVE_TAG(d, DRIVE_INSERT)];

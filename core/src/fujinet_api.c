@@ -15,7 +15,10 @@
 #include <winsock2.h>
 #else
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -55,10 +58,33 @@ static int http(const char *method, const char *path, const char *json, char *bo
     a.sin_family = AF_INET;
     a.sin_port = htons(A800SESSION_WEBUI_PORT);
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#if !defined(_WIN32)
+    /* a connect that cannot finish quickly is a server that is not there */
+    {
+        int fl = fcntl(fd, F_GETFL, 0), cr;
+        fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+        cr = connect(fd, (struct sockaddr *)&a, sizeof a);
+        if (cr != 0 && errno == EINPROGRESS) {
+            struct pollfd pf = {fd, POLLOUT, 0};
+            int err = 0;
+            socklen_t el = sizeof err;
+            cr = poll(&pf, 1, 1000) == 1 && getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) == 0 &&
+                         err == 0
+                     ? 0
+                     : -1;
+        }
+        fcntl(fd, F_SETFL, fl);
+        if (cr != 0) {
+            a800_closesocket(fd);
+            return -1;
+        }
+    }
+#else
     if (connect(fd, (struct sockaddr *)&a, sizeof a) != 0) {
         a800_closesocket(fd);
         return -1;
     }
+#endif
     snprintf(req, sizeof req,
              "%s %s HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n"
              "Content-Type: application/json\r\nContent-Length: %u\r\n\r\n%s",
@@ -127,10 +153,15 @@ static const char *read_string(const char *p, char *out, size_t outsz)
     return *p == '"' ? p + 1 : NULL;
 }
 
-/* The list, fetched at most twice a second: menus ask for each drive. */
+/* The list, fetched at most twice a second -- the answer, or the failure to
+ * get one (a dead server must not be asked again by every caller, each
+ * waiting out a timeout). Fetches are one at a time and run without the
+ * cache lock, so a slow request does not stall readers of the last answer. */
 static pthread_mutex_t s_cache_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t s_fetch_mtx = PTHREAD_MUTEX_INITIALIZER;
 static fujinet_drive s_cache[16];
 static int s_cache_n = -1;
+static int s_cache_valid;
 static double s_cache_at;
 
 static double now_s(void)
@@ -143,24 +174,56 @@ static double now_s(void)
 static void cache_drop(void)
 {
     pthread_mutex_lock(&s_cache_mtx);
-    s_cache_n = -1;
+    s_cache_valid = 0;
     pthread_mutex_unlock(&s_cache_mtx);
 }
 
 static int fetch_drives(fujinet_drive *out, int max);
 
-int fujinet_api_drives(fujinet_drive *out, int max)
+static int cache_fresh_locked(void)
 {
-    int n;
-    pthread_mutex_lock(&s_cache_mtx);
-    if (s_cache_n < 0 || now_s() - s_cache_at > 0.5) {
-        s_cache_n = fetch_drives(s_cache, 16);
-        s_cache_at = now_s();
-    }
-    n = s_cache_n < max ? s_cache_n : max;
+    return s_cache_valid && now_s() - s_cache_at <= 0.5;
+}
+
+static int cache_copy_locked(fujinet_drive *out, int max)
+{
+    int n = s_cache_n < max ? s_cache_n : max;
     if (n > 0)
         memcpy(out, s_cache, (size_t)n * sizeof *out);
+    return s_cache_n < 0 ? -1 : n;
+}
+
+int fujinet_api_drives(fujinet_drive *out, int max)
+{
+    fujinet_drive fresh[16];
+    int n, got;
+    pthread_mutex_lock(&s_cache_mtx);
+    if (cache_fresh_locked()) {
+        n = cache_copy_locked(out, max);
+        pthread_mutex_unlock(&s_cache_mtx);
+        return n;
+    }
     pthread_mutex_unlock(&s_cache_mtx);
+
+    pthread_mutex_lock(&s_fetch_mtx);
+    pthread_mutex_lock(&s_cache_mtx);
+    if (cache_fresh_locked()) {   /* another caller fetched while we waited */
+        n = cache_copy_locked(out, max);
+        pthread_mutex_unlock(&s_cache_mtx);
+        pthread_mutex_unlock(&s_fetch_mtx);
+        return n;
+    }
+    pthread_mutex_unlock(&s_cache_mtx);
+    got = fetch_drives(fresh, 16);
+    pthread_mutex_lock(&s_cache_mtx);
+    if (got > 0)
+        memcpy(s_cache, fresh, (size_t)got * sizeof *fresh);
+    s_cache_n = got;
+    s_cache_valid = 1;
+    s_cache_at = now_s();
+    n = cache_copy_locked(out, max);
+    pthread_mutex_unlock(&s_cache_mtx);
+    pthread_mutex_unlock(&s_fetch_mtx);
     return n;
 }
 

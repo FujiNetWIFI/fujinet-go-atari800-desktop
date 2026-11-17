@@ -362,6 +362,11 @@ typedef struct {
     int  fujinet;           /* a FujiNet slot rather than an internal drive */
 } a800_drive_info;
 int a800session_drive_info(a800session *s, int drive, a800_drive_info *out);
+/* All A800_DRIVES drives at once: with FujiNet one request (the last answer
+ * is reused for half a second), so a refresh costs one round trip rather than
+ * one per drive. May block on that request: call it off the UI thread. Returns
+ * 0, or -1 if FujiNet did not answer (the entries are then empty). */
+int a800session_drive_list(a800session *s, a800_drive_info out[A800_DRIVES]);
 int a800session_drive_insert(a800session *s, int drive, const char *path, int read_only,
                              char *msg, int msgsz);
 int a800session_drive_eject(a800session *s, int drive);
@@ -433,6 +438,18 @@ const char *a800session_fujinet_endpoint(const a800session *s);
 int         a800session_fujinet_link(a800session *s);   /* NetSIO connected */
 const char *a800session_fujinet_webui_url(const a800session *s);
 int         a800session_fujinet_copy_log(a800session *s, char *dst, int max);
+/* The log from where a reader left off, so a window can append rather than
+ * replace. Start with a zeroed cursor. Copies at most max - 1 bytes (NUL
+ * terminated) and moves the cursor past them; call again for the rest.
+ * *reset is set when the reader's place is gone -- FujiNet restarted (a new
+ * log) or the oldest text was trimmed -- and the text then starts the log
+ * over: clear what is shown first. Returns the byte count. */
+typedef struct {
+    unsigned long long offset;
+    unsigned epoch;
+} a800_log_cursor;
+int         a800session_fujinet_read_log(a800session *s, a800_log_cursor *cur, char *dst, int max,
+                                         int *reset);
 int         a800session_fujinet_restart(a800session *s);
 unsigned    a800session_fujinet_generation(a800session *s);
 int         a800session_fujinet_last_event(a800session *s, char *dst, int dstsz);

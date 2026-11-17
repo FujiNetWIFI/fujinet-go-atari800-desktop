@@ -35,6 +35,10 @@ struct _A800Window {
     GtkWidget *status_dot;
     GtkWidget *menu_button;
     char menu_sig[4096];        /* what the media menus last showed */
+    a800_drive_info drives[A800_DRIVES];  /* the last drive snapshot (see drives_refresh) */
+    gboolean drives_busy;       /* a refresh is running off the main thread */
+    gboolean drives_again;      /* ...and something changed since it started */
+    GCancellable *drives_cancel;
     guint status_id;
     guint fast_id;
     unsigned pad_generation;
@@ -49,6 +53,7 @@ struct _A800Window {
 G_DEFINE_FINAL_TYPE(A800Window, a800_window, ADW_TYPE_APPLICATION_WINDOW)
 
 static void rebuild_menu(A800Window *self, gboolean force);
+static void rebuild_menu_from_snapshot(A800Window *self, gboolean force);
 static void update_status(A800Window *self);
 
 void a800_window_toast(A800Window *self, const char *text)
@@ -1422,12 +1427,10 @@ static GMenu *drives_menu(A800Window *self, gboolean fuji)
     GMenu *menu = g_menu_new(), *drives = g_menu_new(), *more = g_menu_new();
 
     for (int d = 0; d < A800_DRIVES; d++) {
-        a800_drive_info di;
+        a800_drive_info di = self->drives[d];   /* the snapshot: no request per build */
         GMenu *sub = g_menu_new();
         g_autofree char *file = NULL;
         g_autofree char *label = NULL;
-        if (a800session_drive_info(self->session, d, &di) != 0)
-            memset(&di, 0, sizeof di);
         file = menu_escape(di.path[0] ? base_name(di.path) : "empty");
         label = g_strdup_printf("D%d: %s%s", d + 1, file,
                                 di.path[0] && di.read_only ? " (protected)" : "");
@@ -1553,7 +1556,7 @@ static GMenu *build_menu(A800Window *self)
 /* What the media menus show, to rebuild only on a change: GtkPopoverMenu
  * names its submenu pages by label, and changing the model it shows in
  * place re-adds pages whose names are still taken. */
-static void rebuild_menu(A800Window *self, gboolean force)
+static void rebuild_menu_from_snapshot(A800Window *self, gboolean force)
 {
     GString *sig = g_string_new(NULL);
     gboolean fuji = a800session_fujinet_running(self->session);
@@ -1561,11 +1564,9 @@ static void rebuild_menu(A800Window *self, gboolean force)
     int block = 0, blocks = 0;
 
     g_string_append_printf(sig, "%d|%d|", fuji, a800session_80col_fitted(self->session));
-    for (int d = 0; d < A800_DRIVES; d++) {
-        a800_drive_info di;
-        if (a800session_drive_info(self->session, d, &di) == 0)
-            g_string_append_printf(sig, "%s%c|", di.path, di.read_only ? '+' : '-');
-    }
+    for (int d = 0; d < A800_DRIVES; d++)
+        g_string_append_printf(sig, "%s%c|", self->drives[d].path,
+                               self->drives[d].read_only ? '+' : '-');
     a800session_cart_info(self->session, info, sizeof info);
     a800session_tape_position(self->session, &block, &blocks);
     g_string_append_printf(sig, "%s|%d", info, blocks);
@@ -1584,6 +1585,59 @@ static void rebuild_menu(A800Window *self, gboolean force)
     g_string_free(sig, TRUE);
 }
 
+/* The drive list comes from FujiNet's web server, one blocking HTTP request:
+ * fetched on a worker thread, one request for all the drives, and the menus
+ * are built from the snapshot it leaves. */
+static void drives_worker(GTask *task, gpointer source, gpointer data, GCancellable *cancel)
+{
+    A800Window *self = source;
+    a800_drive_info *list = g_new0(a800_drive_info, A800_DRIVES);
+    (void)cancel; (void)data;
+    a800session_drive_list(self->session, list);
+    g_task_return_pointer(task, list, g_free);
+}
+
+static void drives_refresh(A800Window *self);
+
+static void drives_done(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    A800Window *self = A800_WINDOW(src);
+    a800_drive_info *list = g_task_propagate_pointer(G_TASK(res), NULL);
+    (void)user_data;
+    if (list && !g_cancellable_is_cancelled(self->drives_cancel)) {
+        memcpy(self->drives, list, sizeof self->drives);
+        self->drives_busy = FALSE;
+        rebuild_menu_from_snapshot(self, FALSE);
+        if (self->drives_again) {
+            self->drives_again = FALSE;
+            drives_refresh(self);
+        }
+    }
+    else {
+        self->drives_busy = FALSE;
+    }
+    g_free(list);
+}
+
+static void drives_refresh(A800Window *self)
+{
+    GTask *task;
+    if (self->drives_busy) {
+        self->drives_again = TRUE;
+        return;
+    }
+    self->drives_busy = TRUE;
+    task = g_task_new(self, self->drives_cancel, drives_done, NULL);
+    g_task_run_in_thread(task, drives_worker);
+    g_object_unref(task);
+}
+
+static void rebuild_menu(A800Window *self, gboolean force)
+{
+    drives_refresh(self);
+    rebuild_menu_from_snapshot(self, force);
+}
+
 /* ---- construction ---------------------------------------------------------------------------------- */
 
 static void a800_window_dispose(GObject *object)
@@ -1597,6 +1651,10 @@ static void a800_window_dispose(GObject *object)
         g_source_remove(self->fast_id);
         self->fast_id = 0;
     }
+    if (self->drives_cancel) {
+        g_cancellable_cancel(self->drives_cancel);
+        g_clear_object(&self->drives_cancel);
+    }
     g_clear_pointer(&self->shot_path, g_free);
     G_OBJECT_CLASS(a800_window_parent_class)->dispose(object);
 }
@@ -1608,7 +1666,7 @@ static void a800_window_class_init(A800WindowClass *klass)
 
 static void a800_window_init(A800Window *self)
 {
-    (void)self;
+    self->drives_cancel = g_cancellable_new();
 }
 
 static GtkWidget *dot(const char *tip)

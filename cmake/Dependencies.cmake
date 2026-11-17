@@ -18,10 +18,12 @@ find_package(Git QUIET)
 set(ATARI800_COMMIT "b49865e63f5675c798d0122a5ff65c89b2f2748b")
 set(ATARI800_URL "https://github.com/atari800/atari800")
 
-# FujiNet pin: master f703133d0 + the BoIP idle-wait fix (fujinet-firmware PR
-# #2247). Temporary: move back to master when #2247 merges. The fork URL is
-# used because the commit is a PR head, absent from a plain upstream clone.
-set(FUJINET_COMMIT "0c9f00c16dff62d2b3c6b08821322f50642594db")
+# FujiNet pin: the fork's master, a merge of FujiNetWIFI master (with the BoIP
+# idle-wait fix #2247 and the SSE disconnect log fix #2246). The fork URL is
+# used because the commit is a merge absent from a plain upstream clone; move
+# to FujiNetWIFI master when the restart fixes (patched in by
+# tools/fujinet/build-fujinet-desktop.sh) are upstream.
+set(FUJINET_COMMIT "251d473f37d8b62616d24f61d9faf08c52b5fc77")
 set(FUJINET_URL "https://github.com/tschak909/fujinet-firmware")
 
 # a800_provide_dependency(NAME <n> PATH <p> SENTINEL <file> OVERRIDE <VAR>

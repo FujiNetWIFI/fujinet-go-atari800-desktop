@@ -16,6 +16,9 @@
 #include <QShortcut>
 #include <QPointer>
 #include <QScrollBar>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <memory>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -68,17 +71,45 @@ void fujinet_log_show(QWidget *parent, a800session *session)
     layout->addWidget(buttons);
 
     auto *timer = new QTimer(win);
-    auto refresh = [view, session]() {
-        static char buf[128 * 1024];
-        const int n = a800session_fujinet_copy_log(session, buf, sizeof(buf));
-        const QString text = n > 0 ? QString::fromUtf8(buf) : QStringLiteral("(no FujiNet output yet)");
-        if (text == view->toPlainText())
-            return;  // unchanged: leave the reader where they are
-        QScrollBar *bar = view->verticalScrollBar();
-        const int value = bar->value();
-        const bool atEnd = value >= bar->maximum() - 2;
-        view->setPlainText(text);
-        bar->setValue(atEnd ? bar->maximum() : value);
+    /* Append what the log gained since the last tick; the view is never
+     * rebuilt, so the reader's scroll position and selection stay put and
+     * only a reader at the bottom follows the new text. A FujiNet restart
+     * (a new log) clears it. */
+    view->setPlainText(QStringLiteral("(no FujiNet output yet)"));
+    auto cursor = std::make_shared<a800_log_cursor>();
+    auto placeholder = std::make_shared<bool>(true);
+    constexpr int kKeepChars = 256 * 1024;
+    auto refresh = [view, session, cursor, placeholder]() {
+        static char buf[64 * 1024];
+        for (int round = 0; round < 16; ++round) {
+            int reset = 0;
+            const int n = a800session_fujinet_read_log(session, cursor.get(), buf, sizeof(buf), &reset);
+            if (n <= 0 && !reset)
+                return;
+            QScrollBar *bar = view->verticalScrollBar();
+            const int value = bar->value();
+            bool atEnd = value >= bar->maximum() - 2;
+            if (reset || *placeholder) {
+                view->clear();
+                *placeholder = false;
+                atEnd = true;
+            }
+            QTextCursor end(view->document());  // not the view's own: its selection stays
+            end.movePosition(QTextCursor::End);
+            end.insertText(QString::fromUtf8(buf));
+            if (view->document()->characterCount() > kKeepChars) {  // whole lines
+                QTextCursor cut(view->document());
+                cut.setPosition(view->document()->characterCount() - kKeepChars * 3 / 4);
+                cut.movePosition(QTextCursor::NextBlock);
+                QTextCursor head(view->document());
+                head.setPosition(0);
+                head.setPosition(cut.position(), QTextCursor::KeepAnchor);
+                head.removeSelectedText();
+            }
+            bar->setValue(atEnd ? bar->maximum() : value);
+            if (n < static_cast<int>(sizeof(buf)) - 1)
+                return;
+        }
     };
     QObject::connect(timer, &QTimer::timeout, view, refresh);
     timer->start(1000);

@@ -313,10 +313,10 @@ void MainWindow::fillDrivesMenu()
     const bool fuji = a800session_fujinet_running(m_session);
     m_drives->clear();
     m_drives->addSection(fuji ? QStringLiteral("FujiNet's drives") : QStringLiteral("atari800's drives"));
+    a800_drive_info all[A800_DRIVES];   // one request for all eight
+    a800session_drive_list(m_session, all);
     for (int d = 0; d < A800_DRIVES; ++d) {
-        a800_drive_info di;
-        if (a800session_drive_info(m_session, d, &di) != 0)
-            memset(&di, 0, sizeof di);
+        const a800_drive_info &di = all[d];
         const QString file = di.path[0] ? QFileInfo(local(di.path)).fileName() : QStringLiteral("empty");
         QMenu *sub = m_drives->addMenu(QStringLiteral("D%1: %2%3").arg(d + 1).arg(file,
             di.path[0] && di.read_only ? QStringLiteral(" (protected)") : QString()));

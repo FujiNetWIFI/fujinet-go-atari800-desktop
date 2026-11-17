@@ -25,10 +25,12 @@
 
 typedef int (*start_runtime_fn)(const char *root, const char *config, const char *sd,
                                 const char *data, int listen_port);
-typedef void (*stop_runtime_fn)(void);
+typedef int (*stop_runtime_fn)(void);   /* 1 stopped, 0 detached and still alive */
 typedef const char *(*last_error_fn)(void);
 typedef int (*copy_log_fn)(char *out, int max_bytes);
 typedef int (*int_fn)(void);
+typedef int (*read_log_fn)(unsigned long long *cursor, unsigned *epoch, char *out, int max,
+                           int *reset);
 typedef int (*read_audio_fn)(int16_t *out, int max_samples, int rate);
 
 /* One runtime per process: the library owns global state and threads. */
@@ -38,6 +40,7 @@ static start_runtime_fn g_start;
 static stop_runtime_fn g_stop;
 static last_error_fn g_last_error;
 static copy_log_fn g_copy_log;
+static read_log_fn g_read_log;
 static int_fn g_is_running, g_exit_code;
 static read_audio_fn g_read_audio;
 
@@ -71,6 +74,7 @@ static int load_library_locked(struct a800session *s)
     g_stop = (stop_runtime_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_stop_runtime");
     g_last_error = (last_error_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_last_error_message");
     g_copy_log = (copy_log_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_copy_recent_log");
+    g_read_log = (read_log_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_read_log");
     g_is_running = (int_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_is_running");
     g_exit_code = (int_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_exit_code");
     g_read_audio = (read_audio_fn)a800_dynlib_sym(g_handle, "fujinet_desktop_read_audio");
@@ -226,22 +230,33 @@ void session_fujinet_stop(struct a800session *s)
     }
     pthread_mutex_unlock(&g_mtx);
     if (stop)
-        stop();
+        (void)stop();   /* quitting: a detached runtime dies with the process */
     session_fujinet_link_lost(s);
 }
 
 /* As unplugging both: FujiNet starts afresh with the Atari. */
 void session_fujinet_restart_for_power(struct a800session *s)
 {
-    int t;
+    int t, stopped = 1;
     pthread_mutex_lock(&g_mtx);
     if (s->fujinet_running) {
-        g_stop();
+        stopped = g_stop();
         s->fujinet_running = 0;
     }
     session_fujinet_link_lost(s);
-    start_locked(s);
+    if (stopped) {
+        start_locked(s);
+    }
+    else {
+        /* the old runtime is wedged and still alive: a second one on its
+         * globals would corrupt both, so FujiNet stays off until the app
+         * is restarted */
+        session_set_error(s, "FujiNet did not stop; restart the app to bring it back");
+        set_event("%.120s", s->last_error);
+    }
     pthread_mutex_unlock(&g_mtx);
+    if (!stopped)
+        return;
     for (t = 0; t < 4000 && !a800session_fujinet_link(s); t += 20)
         a800_sleep_ms(20);
 }
@@ -257,7 +272,8 @@ int a800session_fujinet_restart(a800session *s)
         return -1;
     session_fujinet_restart_for_power(s);
     pthread_mutex_lock(&g_mtx);
-    set_event("FujiNet restarted", NULL);
+    if (s->fujinet_running)
+        set_event("FujiNet restarted", NULL);   /* a failure set its own event */
     pthread_mutex_unlock(&g_mtx);
     return s->fujinet_running ? 0 : -1;
 }
@@ -378,6 +394,29 @@ int a800session_fujinet_copy_log(a800session *s, char *dst, int max)
     fn = g_copy_log;
     pthread_mutex_unlock(&g_mtx);
     return fn ? fn(dst, max) : 0;
+}
+
+int a800session_fujinet_read_log(a800session *s, a800_log_cursor *cur, char *dst, int max,
+                                 int *reset)
+{
+    read_log_fn fn;
+    unsigned long long off;
+    int n;
+    (void)s;
+    if (reset)
+        *reset = 0;
+    if (!cur || !dst || max <= 0)
+        return 0;
+    dst[0] = '\0';
+    pthread_mutex_lock(&g_mtx);
+    fn = g_read_log;
+    pthread_mutex_unlock(&g_mtx);
+    if (!fn)
+        return 0;
+    off = cur->offset;
+    n = fn(&off, &cur->epoch, dst, max, reset);
+    cur->offset = off;
+    return n;
 }
 
 unsigned a800session_fujinet_generation(a800session *s)

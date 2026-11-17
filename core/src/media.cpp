@@ -250,30 +250,44 @@ static int fujinet_mount(a800session* s, int drive, const char* path, int ro, ch
 // drives
 // ---------------------------------------------------------------------------
 
-int a800session_drive_info(a800session* s, int drive, a800_drive_info* out)
+int a800session_drive_list(a800session* s, a800_drive_info out[A800_DRIVES])
 {
 	SessionImpl* im = Impl(s);
-	if (drive < 0 || drive >= A800_DRIVES || !out)
+	if (!out)
 		return -1;
-	memset(out, 0, sizeof *out);
+	memset(out, 0, sizeof(a800_drive_info) * A800_DRIVES);
 	if (s->fujinet_wanted) {
 		fujinet_drive d[16];
-		out->fujinet = 1;
+		for (int i = 0; i < A800_DRIVES; i++)
+			out[i].fujinet = 1;
 		if (s->fujinet_external)
 			return 0;  // its drives are in its own web UI, not ours to ask
-		int n = fujinet_api_drives(d, 16);
+		int n = fujinet_api_drives(d, 16);  // one request, whatever the number of drives
 		for (int i = 0; i < n; i++)
-			if (d[i].slot == drive + 1 && d[i].mounted) {
-				snprintf(out->path, sizeof out->path, "%s%s", d[i].host_slot == 0 ? "SD:" : "",
+			if (d[i].slot >= 1 && d[i].slot <= A800_DRIVES && d[i].mounted) {
+				a800_drive_info* o = &out[d[i].slot - 1];
+				snprintf(o->path, sizeof o->path, "%s%s", d[i].host_slot == 0 ? "SD:" : "",
 				         d[i].path);
-				out->read_only = !d[i].writable;
+				o->read_only = !d[i].writable;
 			}
 		return n < 0 ? -1 : 0;
 	}
 	std::lock_guard<std::mutex> lock(im->mediaMtx);
-	snprintf(out->path, sizeof out->path, "%s", im->drive[drive].c_str());
-	out->read_only = im->driveRO[drive];
+	for (int i = 0; i < A800_DRIVES; i++) {
+		snprintf(out[i].path, sizeof out[i].path, "%s", im->drive[i].c_str());
+		out[i].read_only = im->driveRO[i];
+	}
 	return 0;
+}
+
+int a800session_drive_info(a800session* s, int drive, a800_drive_info* out)
+{
+	a800_drive_info all[A800_DRIVES];
+	if (drive < 0 || drive >= A800_DRIVES || !out)
+		return -1;
+	int rc = a800session_drive_list(s, all);
+	*out = all[drive];
+	return rc;
 }
 
 int a800session_drive_insert(a800session* s, int drive, const char* path, int read_only,

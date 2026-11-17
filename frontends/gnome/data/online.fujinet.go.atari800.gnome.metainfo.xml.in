@@ -64,7 +64,20 @@
     <!-- The CURRENT release templates its version from @PROJECT_VERSION@, so
          it cannot disagree with the tree; past releases are literal. The
          release job checks that this first entry is still a template. -->
-    <release version="@PROJECT_VERSION@" date="2026-11-16">
+    <release version="@PROJECT_VERSION@" date="2026-11-17">
+      <description>
+        <p>
+          Fixed: after a power cycle with “Restart FujiNet on power cycle” on, browsing a TNFS host listed corrupted file names. FujiNet now restarts cleanly: images and hosts are closed before it goes down, and its requests to the server are answered again.
+        </p>
+        <p>
+          The FujiNet Console Log adds new output at the end instead of replacing the whole text, so your scroll position and selection stay put while it updates; it follows the tail only while you are at the bottom.
+        </p>
+        <p>
+          FujiNet is asked for the drive list once per refresh rather than once per drive, off the interface thread, so the console no longer fills with a connection message every second.
+        </p>
+      </description>
+    </release>
+    <release version="0.6.0" date="2026-11-16">
       <description>
         <p>
           macOS: the picture is drawn with Metal in step with the display, so it is smoother on 60 and 120 Hz screens; the emulator runs with game-grade scheduling priority; and the app opts into macOS Game Mode when it is full screen.

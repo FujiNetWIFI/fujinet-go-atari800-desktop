@@ -547,12 +547,13 @@ static void fill_drives_menu(void)
 {
     const int fuji = a800session_fujinet_running(g_session);
     int d;
+    a800_drive_info all[A800_DRIVES];   /* one request for all eight */
+    a800session_drive_list(g_session, all);
     while (GetMenuItemCount(g_drives_menu) > 0) DeleteMenu(g_drives_menu, 0, MF_BYPOSITION);
     for (d = 0; d < A800_DRIVES; d++) {
-        a800_drive_info di;
+        const a800_drive_info di = all[d];
         HMENU sub = CreatePopupMenu(), blank = CreatePopupMenu();
         char label[400];
-        if (a800session_drive_info(g_session, d, &di) != 0) memset(&di, 0, sizeof di);
         snprintf(label, sizeof label, "D%d: %s%s", d + 1, di.path[0] ? base_name(di.path) : "empty",
                  di.path[0] && di.read_only ? " (protected)" : "");
         AppendMenuA(sub, MF_STRING, IDM_DRIVE_INSERT + d, fuji ? "&Mount from the SD Card..." : "&Insert...");
@@ -695,33 +696,71 @@ static HWND g_log_window;
 static HWND g_log_edit, g_log_help;
 #define LOG_BAR 34
 
+static a800_log_cursor g_log_cur;   /* where in FujiNet's log the window has got to */
+static int g_log_placeholder;       /* "no output yet" is on show, not log text */
+#define LOG_KEEP (256 * 1024)       /* a long session keeps the last of it, whole lines */
+
+/* Appends what the log gained since the last tick; the edit is never
+ * rebuilt, so the reader's selection and scroll position stay put and only a
+ * reader at the bottom follows the new text. A FujiNet restart (a new log)
+ * clears it. */
 static void log_refresh(void)
 {
-    static char buf[128 * 1024];
-    static char shown[128 * 1024];
-    const char *text;
-    int n, at_end, first;
-    SCROLLINFO si;
+    static char buf[64 * 1024];
+    static char crlf[2 * sizeof buf + 1];
+    int n, reset, round;
     if (!g_log_edit) return;
-    n = a800session_fujinet_copy_log(g_session, buf, sizeof buf);
-    text = n > 0 ? buf : "(no FujiNet output yet)";
-    /* unchanged: leave the reader where they are */
-    if (!strcmp(text, shown)) return;
-    memset(&si, 0, sizeof si);
-    si.cbSize = sizeof si;
-    si.fMask = SIF_ALL;
-    GetScrollInfo(g_log_edit, SB_VERT, &si);
-    at_end = si.nPos + (int)si.nPage >= si.nMax;
-    first = (int)SendMessageA(g_log_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
-    SetWindowTextA(g_log_edit, text);
-    snprintf(shown, sizeof shown, "%s", text);
-    if (at_end) {
-        /* follow the tail only while the reader is at the bottom */
-        int len = GetWindowTextLengthA(g_log_edit);
+    for (round = 0; round < 16; round++) {
+        DWORD sel0 = 0, sel1 = 0;
+        SCROLLINFO si;
+        int at_end, first, len, now, k = 0;
+        const char *p;
+        n = a800session_fujinet_read_log(g_session, &g_log_cur, buf, sizeof buf, &reset);
+        if (n <= 0 && !reset) return;
+        memset(&si, 0, sizeof si);
+        si.cbSize = sizeof si;
+        si.fMask = SIF_ALL;
+        GetScrollInfo(g_log_edit, SB_VERT, &si);
+        at_end = si.nPos + (int)si.nPage >= si.nMax;
+        first = (int)SendMessageA(g_log_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+        SendMessageA(g_log_edit, EM_GETSEL, (WPARAM)&sel0, (LPARAM)&sel1);
+        if (reset || g_log_placeholder) {
+            SetWindowTextA(g_log_edit, "");
+            g_log_placeholder = 0;
+            at_end = 1;
+            sel0 = sel1 = 0;
+        }
+        for (p = buf; *p && k < (int)sizeof crlf - 2; p++) {   /* an edit control wants CR LF */
+            if (*p == '\n' && (p == buf || p[-1] != '\r')) crlf[k++] = '\r';
+            crlf[k++] = *p;
+        }
+        crlf[k] = 0;
+        len = GetWindowTextLengthA(g_log_edit);
         SendMessageA(g_log_edit, EM_SETSEL, (WPARAM)len, (LPARAM)len);
-        SendMessageA(g_log_edit, EM_SCROLLCARET, 0, 0);
-    } else if (first > 0) {
-        SendMessageA(g_log_edit, EM_LINESCROLL, 0, (LPARAM)first);
+        SendMessageA(g_log_edit, EM_REPLACESEL, FALSE, (LPARAM)crlf);
+        now = GetWindowTextLengthA(g_log_edit);
+        if (now > LOG_KEEP) {
+            int line = (int)SendMessageA(g_log_edit, EM_LINEFROMCHAR, (WPARAM)(now - LOG_KEEP * 3 / 4), 0) + 1;
+            int cut = (int)SendMessageA(g_log_edit, EM_LINEINDEX, (WPARAM)line, 0);
+            if (cut > 0) {
+                SendMessageA(g_log_edit, EM_SETSEL, 0, (LPARAM)cut);
+                SendMessageA(g_log_edit, EM_REPLACESEL, FALSE, (LPARAM)"");
+                sel0 = sel0 > (DWORD)cut ? sel0 - (DWORD)cut : 0;
+                sel1 = sel1 > (DWORD)cut ? sel1 - (DWORD)cut : 0;
+                first = first > line ? first - line : 0;
+                now -= cut;
+            }
+        }
+        if (at_end) {
+            /* follow the tail only while the reader is at the bottom */
+            SendMessageA(g_log_edit, EM_SETSEL, (WPARAM)now, (LPARAM)now);
+            SendMessageA(g_log_edit, EM_SCROLLCARET, 0, 0);
+        } else {
+            int cur = (int)SendMessageA(g_log_edit, EM_GETFIRSTVISIBLELINE, 0, 0);
+            SendMessageA(g_log_edit, EM_SETSEL, (WPARAM)sel0, (LPARAM)sel1);   /* the reader's selection */
+            if (cur != first) SendMessageA(g_log_edit, EM_LINESCROLL, 0, (LPARAM)(first - cur));
+        }
+        if (n < (int)sizeof buf - 1) return;
     }
 }
 
@@ -777,6 +816,10 @@ static void show_fujinet_log(void)
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
         0, 0, rc.right - rc.left, rc.bottom - rc.top, g_log_window, (HMENU)(INT_PTR)IDC_LOG_EDIT, g_inst, NULL);
     SendMessageA(g_log_edit, WM_SETFONT, (WPARAM)GetStockObject(ANSI_FIXED_FONT), TRUE);
+    SendMessageA(g_log_edit, EM_LIMITTEXT, 0, 0);   /* the 30000-character default would cut the log */
+    memset(&g_log_cur, 0, sizeof g_log_cur);
+    SetWindowTextA(g_log_edit, "(no FujiNet output yet)");
+    g_log_placeholder = 1;
     g_log_help = CreateWindowA("BUTTON", "Help", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 0, 0, 10, 10,
                                g_log_window, (HMENU)(INT_PTR)IDC_LOG_HELP, g_inst, NULL);
     SendMessageA(g_log_help, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
